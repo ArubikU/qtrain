@@ -112,6 +112,78 @@ __global__ void k_quant(cf* s, uint64_t N, float scale, double* err2) {
 	s[i] = cf(re, im);
 }
 
+/* =====================================================================
+ * int16 storage path — the compression that saves real device memory.
+ * State stored as short2 (int16 real, int16 imag) + a scalar scale. A
+ * normalized state has |amp|<=1 so scale=1/32767 covers phi; lambda=H|phi>
+ * has |amp|<=sum|coeff| so its scale is set a priori. Each gate dequantizes
+ * a pair to float, applies the 2x2, and requantizes — that per-gate
+ * round-trip IS the injected compression (tracked into D). Paulis are exact
+ * on int16 (permute/negate), so generators inject nothing.
+ * Residency: 2 trajectories * 4 B/amp = 8 B/amp (half of complex64).
+ * ===================================================================== */
+#define Q16 32767.0f
+
+__device__ __forceinline__ cf dq(short2 v, float s) { return cf(v.x * s, v.y * s); }
+__device__ __forceinline__ short2 qz(cf z, float s) {
+	float r = rintf(z.real() / s), i = rintf(z.imag() / s);
+	r = fmaxf(-Q16, fminf(Q16, r)); i = fmaxf(-Q16, fminf(Q16, i));
+	return make_short2((short)r, (short)i);
+}
+
+__global__ void k16_apply2x2(short2* s, uint64_t N, uint64_t bit, uint64_t cmask,
+                             cf m0, cf m1, cf m2, cf m3, float scale, double* err2) {
+	uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= N || (i & bit)) return;
+	if ((i & cmask) != cmask) return;
+	uint64_t j = i | bit;
+	cf a = dq(s[i], scale), b = dq(s[j], scale);
+	cf na = m0 * a + m1 * b, nb = m2 * a + m3 * b;
+	short2 qa = qz(na, scale), qb = qz(nb, scale);
+	cf da = na - dq(qa, scale), db = nb - dq(qb, scale);
+	atomicAdd(err2, (double)(thrust::norm(da) + thrust::norm(db)));
+	s[i] = qa; s[j] = qb;
+}
+__global__ void k16_generator(short2* s, uint64_t N, uint64_t bit, int gen) {
+	uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= N || (i & bit)) return;
+	uint64_t j = i | bit; short2 a = s[i], b = s[j];
+	if (gen == GEN_X) { s[i] = b; s[j] = a; }
+	else if (gen == GEN_Y) { s[i] = make_short2(b.y, (short)-b.x); s[j] = make_short2((short)-a.y, a.x); }
+	else { s[j] = make_short2((short)-b.x, (short)-b.y); }
+}
+__global__ void k16_setzero(short2* s, uint64_t N) {
+	uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+	if (i < N) s[i] = make_short2(0, 0);
+}
+/* lambda += coeff * phi  (phi at sphi, lambda at slam) */
+__global__ void k16_axpy(short2* lam, const short2* phi, float coeff,
+                         float sphi, float slam, uint64_t N) {
+	uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= N) return;
+	cf L = dq(lam[i], slam) + coeff * dq(phi[i], sphi);
+	lam[i] = qz(L, slam);
+}
+__global__ void k16_redot(const short2* a, const short2* b, float sa, float sb,
+                          uint64_t N, double* acc) {
+	uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= N) return;
+	cf v = thrust::conj(dq(a[i], sa)) * dq(b[i], sb);
+	atomicAdd(acc, (double)v.real());
+}
+__global__ void k16_gradterm(const short2* L, const short2* P, uint64_t N, uint64_t bit,
+                             int gen, float sL, float sP, double* acc) {
+	uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+	if (i >= N || (i & bit)) return;
+	uint64_t j = i | bit;
+	cf Li = dq(L[i], sL), Lj = dq(L[j], sL), Pi = dq(P[i], sP), Pj = dq(P[j], sP);
+	cf t;
+	if (gen == GEN_X)      t = thrust::conj(Li) * Pj + thrust::conj(Lj) * Pi;
+	else if (gen == GEN_Y) t = thrust::conj(Li) * (cf(0,-1) * Pj) + thrust::conj(Lj) * (cf(0,1) * Pi);
+	else                   t = thrust::conj(Li) * Pi + thrust::conj(Lj) * (-Pj);
+	atomicAdd(acc, (double)t.imag());
+}
+
 /* ---- host helpers ---- */
 static void rot_cf(int gen, double th, cf m[4]) {
 	float c = (float)std::cos(th / 2), s = (float)std::sin(th / 2);
@@ -243,6 +315,93 @@ private:
 	std::vector<AGate> gates_;
 };
 
+/* int16-storage circuit: same builder API, half the resident bytes. */
+class GPUCircuitQ {
+public:
+	explicit GPUCircuitQ(int n) : n_(n) {
+		if (n < 1 || n > 40) throw std::runtime_error("n out of range");
+	}
+	int num_qubits() const { return n_; }
+	int num_params() const { return nparams_; }
+	void rot(int gen, int q, double theta, bool trainable, int slot) {
+		AGate g; g.gen = gen; g.q = q; g.theta = theta;
+		g.param = trainable; g.pidx = trainable ? slot : -1;
+		if (trainable && slot + 1 > nparams_) nparams_ = slot + 1;
+		gates_.push_back(g);
+	}
+	void fixed(int q, std::complex<double> a, std::complex<double> b,
+	           std::complex<double> c, std::complex<double> d) {
+		AGate g; g.q = q; g.m[0]=a; g.m[1]=b; g.m[2]=c; g.m[3]=d; gates_.push_back(g);
+	}
+	void cfixed(std::vector<int> ctrl, int q, std::complex<double> a, std::complex<double> b,
+	            std::complex<double> c, std::complex<double> d) {
+		AGate g; g.q = q; g.ctrl = std::move(ctrl);
+		g.m[0]=a; g.m[1]=b; g.m[2]=c; g.m[3]=d; gates_.push_back(g);
+	}
+
+	std::tuple<double, std::vector<double>, double> run(const Ham& H) {
+		const uint64_t N = uint64_t(1) << n_;
+		const int B = blocks(N);
+		const float sphi = 1.0f / Q16;                 /* |phi| <= 1 */
+		double Cabs = 0; for (auto& t : H) Cabs += std::fabs(t.coeff);
+		const float slam = (float)(Cabs > 0 ? Cabs : 1.0) / Q16;  /* |lambda| <= sum|coeff| */
+
+		short2 *phi, *lambda;
+		CUDA_OK(cudaMalloc(&phi, N * sizeof(short2)));
+		CUDA_OK(cudaMalloc(&lambda, N * sizeof(short2)));
+		DevAccum err;
+
+		/* forward on int16 phi (scale sphi) */
+		k16_setzero<<<B, TPB>>>(phi, N);
+		{ short2 one = make_short2((short)Q16, 0);
+		  CUDA_OK(cudaMemcpy(phi, &one, sizeof(short2), cudaMemcpyHostToDevice)); }
+		for (auto& g : gates_) apply16(phi, g, N, sphi, err.d);
+
+		/* lambda = H|phi> in int16 (scale slam), no float buffer */
+		k16_setzero<<<B, TPB>>>(lambda, N);
+		for (auto& t : H) {
+			for (auto& op : t.ops) k16_generator<<<B, TPB>>>(phi, N, uint64_t(1) << op.first, op.second);
+			k16_axpy<<<B, TPB>>>(lambda, phi, (float)t.coeff, sphi, slam, N);
+			for (auto& op : t.ops) k16_generator<<<B, TPB>>>(phi, N, uint64_t(1) << op.first, op.second);
+		}
+		DevAccum acc; acc.zero();
+		k16_redot<<<B, TPB>>>(phi, lambda, sphi, slam, N, acc.d);
+		double value = acc.get();
+
+		std::vector<double> grad(nparams_, 0.0);
+		err.zero();
+		for (int k = int(gates_.size()) - 1; k >= 0; k--) {
+			const AGate& g = gates_[k];
+			if (g.param && g.pidx >= 0) {
+				acc.zero();
+				k16_gradterm<<<B, TPB>>>(lambda, phi, N, uint64_t(1) << g.q, g.gen, slam, sphi, acc.d);
+				grad[g.pidx] = acc.get();
+			}
+			apply16_inv(phi, g, N, sphi, err.d);
+			apply16_inv(lambda, g, N, slam, err.d);
+		}
+		double D = std::sqrt(err.get());
+		CUDA_OK(cudaFree(phi)); CUDA_OK(cudaFree(lambda));
+		return {value, grad, D};
+	}
+
+private:
+	void apply16(short2* s, const AGate& g, uint64_t N, float scale, double* err) {
+		cf m[4];
+		if (g.gen != GEN_NONE) rot_cf(g.gen, g.theta, m); else mat_cf(g, m);
+		uint64_t cmask = 0; for (int c : g.ctrl) cmask |= uint64_t(1) << c;
+		k16_apply2x2<<<blocks(N), TPB>>>(s, N, uint64_t(1) << g.q, cmask, m[0], m[1], m[2], m[3], scale, err);
+	}
+	void apply16_inv(short2* s, const AGate& g, uint64_t N, float scale, double* err) {
+		cf m[4];
+		if (g.gen != GEN_NONE) rot_cf(g.gen, -g.theta, m);
+		else { cf tmp[4]; mat_cf(g, tmp); dagger_cf(tmp, m); }
+		uint64_t cmask = 0; for (int c : g.ctrl) cmask |= uint64_t(1) << c;
+		k16_apply2x2<<<blocks(N), TPB>>>(s, N, uint64_t(1) << g.q, cmask, m[0], m[1], m[2], m[3], scale, err);
+	}
+	int n_; int nparams_ = 0; std::vector<AGate> gates_;
+};
+
 PYBIND11_MODULE(qubit_gpu_native, m) {
 	m.doc() = "CUDA adjoint training kernels for the qubit simulator (complex64).";
 	py::class_<GPUCircuit>(m, "GPUCircuit")
@@ -268,4 +427,23 @@ PYBIND11_MODULE(qubit_gpu_native, m) {
 			     Ham H; for (auto& t : terms) H.push_back({t.first, t.second});
 			     return c.run(H, levels);
 		     }, py::arg("hamiltonian"), py::arg("levels"));
+
+	py::class_<GPUCircuitQ>(m, "GPUCircuitQ")
+		.def(py::init<int>(), py::arg("num_qubits"))
+		.def_property_readonly("num_qubits", &GPUCircuitQ::num_qubits)
+		.def_property_readonly("num_params", &GPUCircuitQ::num_params)
+		.def("rot", &GPUCircuitQ::rot,
+		     py::arg("gen"), py::arg("q"), py::arg("theta"), py::arg("trainable"), py::arg("slot"))
+		.def("fixed", &GPUCircuitQ::fixed,
+		     py::arg("q"), py::arg("m00"), py::arg("m01"), py::arg("m10"), py::arg("m11"))
+		.def("cfixed", &GPUCircuitQ::cfixed,
+		     py::arg("ctrl"), py::arg("q"), py::arg("m00"), py::arg("m01"), py::arg("m10"), py::arg("m11"))
+		.def("value_and_grad",
+		     [](GPUCircuitQ& c,
+		        const std::vector<std::pair<double, std::vector<std::pair<int, int>>>>& terms) {
+			     Ham H; for (auto& t : terms) H.push_back({t.first, t.second});
+			     return c.run(H);   /* (value, grad, D) — int16 storage */
+		     }, py::arg("hamiltonian"),
+		     "Adjoint with int16 resident storage (4 B/amp/traj, half of "
+		     "complex64). Returns (value, grad, D).");
 }

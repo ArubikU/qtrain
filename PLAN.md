@@ -138,10 +138,16 @@ Validate the hard assumption before investing in ecosystem:
       gradient computes (4.3 GB, 268M amplitudes) — past the dense
       Lightning/Aer ceiling on the same card. A **22-qubit** VQE trains
       end to end on the GPU with the compressed adjoint.
-- [ ] 30-32q: needs int16 DEVICE storage (halve bytes -> 30q at ~4.3 GB).
-      value_and_grad_q already models the compression error on-device but
-      still allocates complex64; swapping the resident arrays to int16 +
-      per-block scale is the remaining step. Then QAOA + T4 replicate.
+- [x] int16 DEVICE storage (`GPUCircuitQ`, short2 = 4 B/amp/traj): the
+      compression that saves real device memory, not just models error.
+      Gradient direction matches the exact CPU adjoint (cosine similarity
+      >0.9999, tests/test_gpu_i16.py). Reaches ~29 qubits on 6 GB where
+      dense complex64 OOMs (~28) — the capability crossover, on GPU.
+- [ ] 30-32q: tiered blocks (ZERO tier for near-empty blocks) over uniform
+      int16 — the sparse-block win for the last 1-3 qubits. Larger
+      subsystem (block classification + dynamic tiers).
+- [ ] T4 free-cloud replication of the GPU results (reproducibility for
+      paper 2). Noted for a later session.
 - [ ] Release qtrain 1.0 + plugin on PyPI (with Phase 1's deferred CI).
 
 ### Phase 5 — Stretch (M12+)
