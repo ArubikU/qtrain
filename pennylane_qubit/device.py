@@ -1,10 +1,14 @@
 """
 pennylane-qubit: a PennyLane device backed by the qubit state-vector engine.
 
-Phase 1 scope: analytic (shots=None) execution of expectation values, state,
-and probabilities. This is what variational training (VQE / QML) needs; the
-device is the entry point through which qtrain's error-bounded, compressed
-gradients will later be exposed (adjoint diff lands in a subsequent phase).
+Phase 1 scope:
+  - analytic (shots=None): expval, state, probs.
+  - finite-shot: expval, probs, sample, counts (computational-basis samples
+    from the engine, mapped through PennyLane's process_samples).
+
+This is what variational training (VQE / QML) needs; the device is the entry
+point through which qtrain's error-bounded, compressed gradients will later
+be exposed (adjoint diff lands in a subsequent phase).
 
 Register name: "qubit.simulator".
 """
@@ -15,6 +19,7 @@ import pennylane as qml
 from pennylane.devices import Device, ExecutionConfig
 from pennylane.transforms.core import TransformProgram
 from pennylane.tape import QuantumScript
+from pennylane.wires import Wires
 
 import qubit_native as qn
 
@@ -45,14 +50,26 @@ def _supported(op) -> bool:
     return op.name in _GATES
 
 
+def _pauli_rotation(word):
+    """Ops that rotate a Pauli word into the Z eigenbasis, plus its Z wires.
+       X: H   Y: S-dagger, H   Z: nothing."""
+    extra, wires = [], []
+    for wire, letter in word.items():
+        if letter == "X":
+            extra.append(qml.Hadamard(wire))
+        elif letter == "Y":
+            extra.append(qml.PhaseShift(-np.pi / 2, wire))  # S-dagger
+            extra.append(qml.Hadamard(wire))
+        wires.append(wire)
+    return extra, wires
+
+
 class QubitDevice(Device):
     """PennyLane device wrapping the qubit CPU engine."""
 
     name = "qubit.simulator"
 
     def __init__(self, wires=None, shots=None, fidelity: float = 1.0, seed: int = 0xC0FFEE):
-        if shots is not None:
-            raise qml.DeviceError("qubit.simulator is analytic-only in Phase 1 (use shots=None).")
         super().__init__(wires=wires, shots=shots)
         self._fidelity = float(fidelity)
         self._seed = int(seed)
@@ -74,10 +91,10 @@ class QubitDevice(Device):
         results = tuple(self._execute_tape(t) for t in tapes)
         return results[0] if single else results
 
-    # ---- internals ----
+    # ---- circuit / run plumbing ----
     def _wire_order(self, tape):
-        wires = self.wires if self.wires is not None else tape.wires
-        return {w: i for i, w in enumerate(wires)}, len(wires)
+        wires = list(self.wires) if self.wires is not None else list(tape.wires)
+        return wires, {w: i for i, w in enumerate(wires)}, len(wires)
 
     def _build_circuit(self, tape, wmap, n, extra_ops=()):
         c = qn.Circuit(n)
@@ -86,11 +103,13 @@ class QubitDevice(Device):
             _GATES[op.name](c, w, op.data)
         return c
 
-    def _run(self, circuit):
+    def _run(self, circuit, shots=None):
         opts = qn.RunOptions()
         opts.device = qn.Device.Auto
         opts.fidelity = self._fidelity
         opts.seed = self._seed
+        if shots:
+            opts.shots = int(shots)
         return qn.run(circuit, opts)
 
     def _statevector(self, tape, wmap, n):
@@ -107,29 +126,63 @@ class QubitDevice(Device):
             vec[i] = r.amplitude(qi)
         return vec
 
-    def _execute_tape(self, tape):
-        wmap, n = self._wire_order(tape)
-        out = []
-        for m in tape.measurements:
-            mp = type(m).__name__
-            if mp == "ExpectationMP":
-                out.append(self._expval(tape, wmap, n, m.obs))
-            elif mp == "StateMP":
-                out.append(self._statevector(tape, wmap, n))
-            elif mp == "ProbabilityMP":
-                out.append(self._probs(tape, wmap, n, m.wires))
-            else:
-                raise qml.DeviceError(f"qubit.simulator does not support {mp} yet.")
-        if len(out) == 1:
-            return out[0]
-        return tuple(out)
+    def _comp_samples(self, tape, wmap, n, extra_ops, shots):
+        """(shots, n) array of 0/1 computational-basis samples, column k = line k."""
+        r = self._run(self._build_circuit(tape, wmap, n, extra_ops), shots=shots)
+        out = np.empty((shots, n), dtype=np.int64)
+        row = 0
+        for key, cnt in r.counts.items():
+            # engine key char[i] = qubit line (n-1-i); column k = line k = char[n-1-k]
+            bits = [int(key[n - 1 - k]) for k in range(n)]
+            for _ in range(cnt):
+                out[row] = bits
+                row += 1
+        return out[:row]
 
-    def _probs(self, tape, wmap, n, wires):
+    # ---- dispatch ----
+    def _tape_shots(self, tape):
+        s = tape.shots
+        return int(s.total_shots) if (s and s.total_shots) else None
+
+    def _execute_tape(self, tape):
+        wires, wmap, n = self._wire_order(tape)
+        shots = self._tape_shots(tape)
+        out = [self._measure(tape, wires, wmap, n, m, shots) for m in tape.measurements]
+        return out[0] if len(out) == 1 else tuple(out)
+
+    def _measure(self, tape, wires, wmap, n, m, shots):
+        mp = type(m).__name__
+        if shots is None:
+            if mp == "ExpectationMP":
+                return self._expval_analytic(tape, wmap, n, m.obs)
+            if mp == "StateMP":
+                return self._statevector(tape, wmap, n)
+            if mp == "ProbabilityMP":
+                return self._probs_analytic(tape, wmap, n, m.wires)
+            raise qml.DeviceError(f"qubit.simulator: analytic {mp} not supported.")
+        # ---- finite-shot ----
+        if mp == "ExpectationMP":
+            return self._expval_shots(tape, wmap, n, m.obs, shots)
+        if mp in ("SampleMP", "CountsMP", "ProbabilityMP"):
+            obs = getattr(m, "obs", None)
+            if obs is not None:
+                ps = qml.pauli.pauli_sentence(obs)
+                if len(ps) != 1:
+                    raise qml.DeviceError(f"qubit.simulator: shot {mp} needs a single Pauli observable.")
+                word = next(iter(ps))
+                extra, _ = _pauli_rotation(word)
+            else:
+                extra = ()
+            samples = self._comp_samples(tape, wmap, n, extra, shots)
+            return m.process_samples(samples, wire_order=Wires(wires))
+        raise qml.DeviceError(f"qubit.simulator: shot {mp} not supported.")
+
+    # ---- analytic implementations ----
+    def _probs_analytic(self, tape, wmap, n, wires):
         vec = self._statevector(tape, wmap, n)
         full = np.abs(vec) ** 2
         if wires is None or len(wires) == 0 or len(wires) == n:
             return full
-        # marginalize onto the requested wires (PennyLane MSB-first order)
         keep = [wmap[w] for w in wires]
         marg = np.zeros(1 << len(keep))
         for i in range(1 << n):
@@ -140,26 +193,32 @@ class QubitDevice(Device):
             marg[idx] += full[i]
         return marg
 
-    def _expval(self, tape, wmap, n, obs):
-        # decompose observable into a Pauli sentence: {PauliWord: coeff}
+    def _expval_analytic(self, tape, wmap, n, obs):
         ps = qml.pauli.pauli_sentence(obs)
         total = 0.0
         for word, coeff in ps.items():
-            if len(word) == 0:            # identity term
+            if len(word) == 0:
                 total += float(np.real(coeff))
                 continue
-            # Rotate each Pauli letter into the Z eigenbasis, then measure Z.
-            #   X:  H            (H Z H = X)
-            #   Y:  S-dagger, H  (standard Y-basis measurement)
-            #   Z:  nothing
-            extra, zwires = [], []
-            for wire, letter in word.items():
-                if letter == "X":
-                    extra.append(qml.Hadamard(wire))
-                elif letter == "Y":
-                    extra.append(qml.PhaseShift(-np.pi / 2, wire))  # S-dagger
-                    extra.append(qml.Hadamard(wire))
-                zwires.append(wmap[wire])
+            extra, wlist = _pauli_rotation(word)
             r = self._run(self._build_circuit(tape, wmap, n, extra))
-            total += float(np.real(coeff)) * r.expectation_z(zwires)
+            total += float(np.real(coeff)) * r.expectation_z([wmap[w] for w in wlist])
+        return np.array(total)
+
+    # ---- shot implementations ----
+    def _expval_shots(self, tape, wmap, n, obs, shots):
+        """Estimate <sum c_i P_i> from computational-basis samples, per Pauli term."""
+        ps = qml.pauli.pauli_sentence(obs)
+        total = 0.0
+        for word, coeff in ps.items():
+            c = float(np.real(coeff))
+            if len(word) == 0:
+                total += c
+                continue
+            extra, wlist = _pauli_rotation(word)
+            samples = self._comp_samples(tape, wmap, n, extra, shots)
+            cols = [wmap[w] for w in wlist]
+            # eigenvalue per shot = product over the word's wires of (+1 for bit0, -1 for bit1)
+            eig = np.prod(1 - 2 * samples[:, cols], axis=1)
+            total += c * float(np.mean(eig))
         return np.array(total)

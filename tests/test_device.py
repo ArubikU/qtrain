@@ -74,5 +74,61 @@ def c6():
 check("expval after Rot decomp", *run_both(c6, 2))
 
 
+# ---- finite-shot mode (statistical tolerance vs default.qubit) ----
+SHOTS = 200000
+STOL = 0.02
+
+
+def run_both_shots(fn, wires, shots=SHOTS):
+    dev_q = QubitDevice(wires=wires)
+    dev_d = qml.device("default.qubit", wires=wires)
+    qn_q = qml.set_shots(qml.QNode(fn, dev_q), shots=shots)
+    qn_d = qml.set_shots(qml.QNode(fn, dev_d), shots=shots)
+    return qn_q(), qn_d()
+
+
+def check_stat(name, got, ref, tol=STOL):
+    global fails
+    got, ref = np.asarray(got, dtype=float), np.asarray(ref, dtype=float)
+    err = np.max(np.abs(got - ref)) if got.size else 0.0
+    ok = err < tol
+    fails += 0 if ok else 1
+    print(f"[{'PASS' if ok else 'FAIL'}] {name:32s} max|err|={err:.2e} (shots)")
+
+
+def s1():
+    qml.RY(0.9, 0); qml.RX(0.4, 1); qml.CNOT([0, 1])
+    return qml.expval(qml.PauliX(0) @ qml.PauliY(1))
+check_stat("shot expval X0Y1", *run_both_shots(s1, 2))
+
+
+def s2():
+    qml.RY(0.9, 0); qml.RX(0.4, 1); qml.CNOT([0, 1])
+    H = qml.Hamiltonian([0.5, -1.2, 0.3],
+                        [qml.PauliZ(0), qml.PauliX(0) @ qml.PauliX(1), qml.PauliY(1)])
+    return qml.expval(H)
+check_stat("shot expval Hamiltonian", *run_both_shots(s2, 2))
+
+
+def s3():
+    qml.Hadamard(0); qml.CNOT([0, 1]); qml.RY(1.3, 2)
+    return qml.probs(wires=[0, 2])
+check_stat("shot probs [0,2]", *run_both_shots(s3, 3))
+
+
+# counts: compare frequencies on matching keys
+def s4():
+    qml.Hadamard(0); qml.CNOT([0, 1])
+    return qml.counts(wires=[0, 1])
+cq, cd_ = run_both_shots(s4, 2)
+freq_q = {k: v / SHOTS for k, v in cq.items()}
+freq_d = {k: v / SHOTS for k, v in cd_.items()}
+keys = set(freq_q) | set(freq_d)
+cerr = max(abs(freq_q.get(k, 0) - freq_d.get(k, 0)) for k in keys)
+ok = cerr < STOL
+fails += 0 if ok else 1
+print(f"[{'PASS' if ok else 'FAIL'}] {'shot counts [0,1]':32s} max|err|={cerr:.2e} (shots)")
+
+
 print("\n" + ("ALL TESTS PASSED" if fails == 0 else f"{fails} TEST(S) FAILED"))
 sys.exit(1 if fails else 0)

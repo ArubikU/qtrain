@@ -61,10 +61,17 @@ Validate the hard assumption before investing in ecosystem:
 - [x] Trainability gate: `examples/vqe_train.py` — a GradientDescent
       optimizer drives a TFIM VQE on `qubit.simulator` to the SAME energy
       as default.qubit (param-shift through the device). End-to-end proof.
-- [ ] Finite-shot / sampling mode (SampleMP, CountsMP). Deferred.
-- [ ] CI wheel build (Windows + Linux), PyPI entry point. Deferred; entry
-      point declared in setup.py, currently used via direct import.
-- Deliverable (met, local): run a PennyLane VQE on the qubit engine.
+- [x] Finite-shot mode: expval (per-Pauli-term estimate), probs, sample,
+      counts — computational-basis samples from the engine mapped through
+      PennyLane's process_samples. 4/4 match default.qubit within
+      statistical tolerance (200k shots, err ~1e-3).
+- [ ] CI wheel build (Windows + Linux), PyPI entry point. DEFERRED to
+      Phase 4: nothing worth publishing until adjoint+compression land and
+      the API stabilizes; the build is also not yet portable (hard-coded
+      paths, setuptools misses VS). Entry point declared in setup.py;
+      used via direct import for now.
+- Deliverable (met, local): run a PennyLane VQE on the qubit engine, in
+  both analytic and finite-shot modes.
 
 ### Phase 2 — Adjoint differentiation, dense (M3-4)
 - Adjoint method (Jones & Gacon 2020 style) in the C++ engine:
