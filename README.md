@@ -33,9 +33,10 @@ Phases 0-3 done, Phase 4 in progress (CPU). See [PLAN.md](PLAN.md).
 - **Phase 3 [CORE]** — error-bounded gradients through int16 compression:
   |grad error| <= budget D, linear, training-convergent (compression cost
   6e-5 in energy at a fine budget). This is the paper-2 contribution.
-- **Phase 4** — CPU training demo + capability crossover done; the GPU
-  30-32q headline figure is the remaining engineering
-  ([paper2/outline.md](paper2/outline.md)).
+- **Phase 4** — GPU adjoint (`src/adjoint_gpu.cu`, CUDA complex64) runs a
+  **28-qubit gradient on a 6 GB laptop GPU** and trains a **22-qubit VQE**;
+  GPU beats CPU up to 15x at 20q. 30-32q needs int16 device storage (the
+  one remaining step, [paper2/outline.md](paper2/outline.md)).
 
 ### Quick start
 

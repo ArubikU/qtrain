@@ -129,10 +129,19 @@ Validate the hard assumption before investing in ecosystem:
 - [x] Paper 2 outline (`paper2/outline.md`): claims mapped to artifacts,
       structure, figure status, and the honest GPU gap. Reuses paper 1's
       peer-review pipeline.
-- [ ] GPU 28-32q VQE/QAOA on the RTX 3060 + T4 — the headline figure.
-      Needs adjoint + tiered-block storage ported into src/qubit_gpu.cu
-      (design proven on CPU; engineering, not research). See
-      paper2/outline.md "Remaining for the GPU demo".
+- [x] GPU adjoint (`src/adjoint_gpu.cu`, CUDA complex64, sm_86): matches
+      CPU adjoint to ~2e-7 (tests/test_gpu_adjoint.py). GPU vs CPU per
+      gradient: 3.3x @16q, 5x @18q, 15x @20q (grows with n). Lambda built
+      in place (Pauli involution restore) so only 2 trajectories reside.
+      bench/phase4_gpu.py.
+- [x] Qubit ceiling on the 6 GB RTX 3060 Laptop: a **28-qubit** adjoint
+      gradient computes (4.3 GB, 268M amplitudes) — past the dense
+      Lightning/Aer ceiling on the same card. A **22-qubit** VQE trains
+      end to end on the GPU with the compressed adjoint.
+- [ ] 30-32q: needs int16 DEVICE storage (halve bytes -> 30q at ~4.3 GB).
+      value_and_grad_q already models the compression error on-device but
+      still allocates complex64; swapping the resident arrays to int16 +
+      per-block scale is the remaining step. Then QAOA + T4 replicate.
 - [ ] Release qtrain 1.0 + plugin on PyPI (with Phase 1's deferred CI).
 
 ### Phase 5 — Stretch (M12+)
