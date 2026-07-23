@@ -57,6 +57,25 @@ property the Phase 0 spike must confirm empirically.
   an annealed-precision training schedule with guarantees. Possibly a
   paper-2 subsection of its own.
 
+## Spike verification (Phase 0, compress_spike.cpp)
+
+The predicted linear bound holds empirically. Measured max gradient
+error vs total injected norm D on a 6-qubit, 3-layer TFIM circuit:
+
+| levels | D       | max grad err | err/D |
+|--------|---------|--------------|-------|
+| 4      | 5.1e+01 | 1.81e+00     | 0.035 |
+| 16     | 9.2e+00 | 2.44e-01     | 0.026 |
+| 64     | 2.3e+00 | 5.97e-02     | 0.025 |
+| 256    | 5.8e-01 | 1.54e-02     | 0.027 |
+| 1024   | 1.4e-01 | 5.65e-03     | 0.039 |
+
+err/D is ~constant (~0.03) over three orders of magnitude: the error
+is linear in D, and the worst-case bound |grad err| <= D holds with
+~30x margin. Training (Step 3) converges with a graceful, budget-tunable
+gap, so the deterministic quantization bias (open question 1) does not
+break optimization in practice at these budgets.
+
 ## Open questions (spike must answer)
 
 1. Quantization error is deterministic given the state, not zero-mean:

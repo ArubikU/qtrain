@@ -26,3 +26,22 @@ gradient training. Checks open question #1 (systematic bias).
 - FAIL contingency: fall back to parameter-shift on compressed states
   (inherits the state bound trivially, costs 2P evals) and re-scope
   the plan around batched execution instead of adjoint.
+
+## RESULT: GATE PASSED (all three steps)
+
+- **Step 1** (adjoint_spike.cpp): adjoint == parameter-shift to
+  5.6e-16 over 20 random circuits. Adjoint is correct.
+- **Step 2** (compress_spike.cpp): gradient error is linear in the
+  injected budget D. err/D stays ~0.03 across D from 0.14 to 51
+  (3 orders of magnitude). The theoretical bound |grad err| <= D holds
+  with ~30x margin (practice is far better than worst case), mirroring
+  paper 1's fidelity-bound-vs-measured story.
+- **Step 3** (compress_spike.cpp): TFIM VQE trained with compressed
+  gradients converges. Final energy gap vs exact-gradient training:
+  1.4e-3 at levels=256, 3.0e-2 at levels=32, 2.0e-1 at levels=8 — a
+  graceful, tunable degradation, no catastrophic quantization bias.
+
+Conclusion: error-bounded gradients through lossy simulation WORK. The
+compression budget is a training-precision knob. Proceed to Phase 1
+(Python bindings + PennyLane device) with the core contribution
+de-risked. This spike result is paper-2 material.
