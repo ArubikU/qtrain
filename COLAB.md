@@ -9,15 +9,11 @@ Runtime must be **GPU (T4)**: Runtime → Change runtime type → T4.
 
 ## Turnkey — paste one cell, it does everything
 
-qtrain is a private repo, so set a GitHub token (any PAT with `repo`
-scope) on the first line. If you make the repo public, leave the token
-empty and it falls back to an anonymous clone.
+The repo is public, so no token needed.
 
 ```bash
 %%bash
-GH_TOKEN=""   # <-- paste a GitHub PAT for the private repo, or leave empty if public
-git clone --quiet https://${GH_TOKEN}@github.com/ArubikU/qtrain.git 2>/dev/null \
-  || git clone --quiet https://github.com/ArubikU/qtrain.git
+git clone --quiet https://github.com/ArubikU/qtrain.git
 cd qtrain
 pip -q install pybind11 numpy
 nvcc -O2 -std=c++17 -arch=sm_75 --shared -Xcompiler "-fPIC -fopenmp -DNDEBUG" \
