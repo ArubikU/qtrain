@@ -181,10 +181,14 @@ inline Vec apply_ham(const Vec& psi, const Ham& H) {
 	return r;
 }
 
-/* ---- circuit builder driven from Python ---- */
-class ACircuit {
+/* ---- circuit builder (data + append API), driven from Python ----
+ * One place records the gate list and the trainable-parameter count.
+ * Executors (CPU ACircuit here; GPU GPUCircuit/GPUCircuitQ in the .cu)
+ * inherit it and add only their run logic — single responsibility, no
+ * triplicated append methods. */
+class CircuitBuilder {
 public:
-	explicit ACircuit(int n) : n_(n) {}
+	explicit CircuitBuilder(int n) : n_(n) {}
 	int num_qubits() const { return n_; }
 	int num_params() const { return nparams_; }
 
@@ -204,8 +208,18 @@ public:
 		g.m[0] = m00; g.m[1] = m01; g.m[2] = m10; g.m[3] = m11;
 		gates_.push_back(g);
 	}
-
 	const std::vector<AGate>& gates() const { return gates_; }
+
+protected:
+	int n_;
+	int nparams_ = 0;
+	std::vector<AGate> gates_;
+};
+
+/* CPU executor: forward + adjoint gradients (exact and compressed). */
+class ACircuit : public CircuitBuilder {
+public:
+	using CircuitBuilder::CircuitBuilder;
 
 	Vec forward() const {
 		Vec s(1ull << n_, cd(0, 0)); s[0] = 1;
@@ -256,11 +270,6 @@ public:
 		}
 		return {value, grad, D};
 	}
-
-private:
-	int n_;
-	int nparams_ = 0;
-	std::vector<AGate> gates_;
 };
 
 } // namespace qtrain

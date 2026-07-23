@@ -207,29 +207,9 @@ struct DevAccum {
 	double get() { double h; CUDA_OK(cudaMemcpy(&h, d, sizeof(double), cudaMemcpyDeviceToHost)); return h; }
 };
 
-class GPUCircuit {
+class GPUCircuit : public qtrain::CircuitBuilder {
 public:
-	explicit GPUCircuit(int n) : n_(n) {
-		if (n < 1 || n > 40) throw std::runtime_error("n out of range");
-	}
-	int num_qubits() const { return n_; }
-	int num_params() const { return nparams_; }
-
-	void rot(int gen, int q, double theta, bool trainable, int slot) {
-		AGate g; g.gen = gen; g.q = q; g.theta = theta;
-		g.param = trainable; g.pidx = trainable ? slot : -1;
-		if (trainable && slot + 1 > nparams_) nparams_ = slot + 1;
-		gates_.push_back(g);
-	}
-	void fixed(int q, std::complex<double> a, std::complex<double> b,
-	           std::complex<double> c, std::complex<double> d) {
-		AGate g; g.q = q; g.m[0]=a; g.m[1]=b; g.m[2]=c; g.m[3]=d; gates_.push_back(g);
-	}
-	void cfixed(std::vector<int> ctrl, int q, std::complex<double> a, std::complex<double> b,
-	            std::complex<double> c, std::complex<double> d) {
-		AGate g; g.q = q; g.ctrl = std::move(ctrl);
-		g.m[0]=a; g.m[1]=b; g.m[2]=c; g.m[3]=d; gates_.push_back(g);
-	}
+	using qtrain::CircuitBuilder::CircuitBuilder;
 
 	/* levels<=0 => exact; else compress phi/lambda each boundary.
 	   returns (value, grad, D). */
@@ -309,35 +289,12 @@ private:
 	}
 	/* host reinterpret of the uint bits produced by __float_as_uint */
 	static float __uint_as_float_host(unsigned u) { float f; std::memcpy(&f, &u, 4); return f; }
-
-	int n_;
-	int nparams_ = 0;
-	std::vector<AGate> gates_;
 };
 
-/* int16-storage circuit: same builder API, half the resident bytes. */
-class GPUCircuitQ {
+/* int16-storage executor: same builder base, half the resident bytes. */
+class GPUCircuitQ : public qtrain::CircuitBuilder {
 public:
-	explicit GPUCircuitQ(int n) : n_(n) {
-		if (n < 1 || n > 40) throw std::runtime_error("n out of range");
-	}
-	int num_qubits() const { return n_; }
-	int num_params() const { return nparams_; }
-	void rot(int gen, int q, double theta, bool trainable, int slot) {
-		AGate g; g.gen = gen; g.q = q; g.theta = theta;
-		g.param = trainable; g.pidx = trainable ? slot : -1;
-		if (trainable && slot + 1 > nparams_) nparams_ = slot + 1;
-		gates_.push_back(g);
-	}
-	void fixed(int q, std::complex<double> a, std::complex<double> b,
-	           std::complex<double> c, std::complex<double> d) {
-		AGate g; g.q = q; g.m[0]=a; g.m[1]=b; g.m[2]=c; g.m[3]=d; gates_.push_back(g);
-	}
-	void cfixed(std::vector<int> ctrl, int q, std::complex<double> a, std::complex<double> b,
-	            std::complex<double> c, std::complex<double> d) {
-		AGate g; g.q = q; g.ctrl = std::move(ctrl);
-		g.m[0]=a; g.m[1]=b; g.m[2]=c; g.m[3]=d; gates_.push_back(g);
-	}
+	using qtrain::CircuitBuilder::CircuitBuilder;
 
 	std::tuple<double, std::vector<double>, double> run(const Ham& H) {
 		const uint64_t N = uint64_t(1) << n_;
@@ -399,7 +356,6 @@ private:
 		uint64_t cmask = 0; for (int c : g.ctrl) cmask |= uint64_t(1) << c;
 		k16_apply2x2<<<blocks(N), TPB>>>(s, N, uint64_t(1) << g.q, cmask, m[0], m[1], m[2], m[3], scale, err);
 	}
-	int n_; int nparams_ = 0; std::vector<AGate> gates_;
 };
 
 PYBIND11_MODULE(qubit_gpu_native, m) {

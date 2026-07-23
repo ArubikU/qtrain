@@ -16,7 +16,7 @@ from pennylane import numpy as pnp
 from pennylane_qubit import QubitDevice
 
 
-def tfim(n):
+def pl_tfim(n):
     coeffs, ops = [], []
     for i in range(n - 1):
         coeffs.append(-1.0); ops.append(qml.PauliZ(i) @ qml.PauliZ(i + 1))
@@ -26,7 +26,7 @@ def tfim(n):
 
 
 def time_grad(dev, diff, n, layers, reps=3):
-    H = tfim(n)
+    H = pl_tfim(n)
 
     def ansatz(theta):
         t = theta.reshape(layers, n, 2)
@@ -79,30 +79,13 @@ print("< 1 means lightning is faster (expected — its dense kernels are tuned).
 # (tape processing, transform program, result marshalling) on BOTH devices.
 # Timing qubit_native's value_and_grad directly shows the actual kernel cost.
 import qubit_native as qn
-X, Y, Z = 1, 2, 3
-
-
-def native_build(n, layers, theta):
-    c = qn.ACircuit(n); p = 0
-    for _ in range(layers):
-        for q in range(n):
-            c.rot(Y, q, float(theta[p]), True, p); p += 1
-            c.rot(Z, q, float(theta[p]), True, p); p += 1
-        for q in range(n):
-            c.cfixed([q], (q + 1) % n, 0, 1, 1, 0)
-    return c
-
-
-def native_ham(n):
-    H = [(-1.0, [(i, Z), (i + 1, Z)]) for i in range(n - 1)]
-    return H + [(-1.0, [(i, X)]) for i in range(n)]
-
+from vqe_helpers import hea_ansatz, tfim
 
 print(f"\n{'n':>3} {'P':>5}  {'native-kernel(ms)':>18}   (adjoint value_and_grad, no framework)")
 for n, layers in [(8, 3), (10, 4), (12, 4), (14, 4)]:
     P = layers * n * 2
     th = np.random.default_rng(0).uniform(-np.pi, np.pi, P)
-    c = native_build(n, layers, th); H = native_ham(n)
+    c = hea_ansatz(qn.ACircuit, n, layers, th); H = tfim(n)
     c.value_and_grad(H)
     t0 = time.perf_counter()
     for _ in range(5):

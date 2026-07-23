@@ -15,24 +15,11 @@ import sys, os, math
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 import qubit_native as qn
-
-X, Y, Z = 1, 2, 3
+from vqe_helpers import hea_ansatz, tfim, exact_ground
 
 
 def build(n, layers, theta):
-    c = qn.ACircuit(n); p = 0
-    for _ in range(layers):
-        for q in range(n):
-            c.rot(Y, q, float(theta[p]), True, p); p += 1
-            c.rot(Z, q, float(theta[p]), True, p); p += 1
-        for q in range(n):
-            c.cfixed([q], (q + 1) % n, 0, 1, 1, 0)   # CNOT ring
-    return c
-
-
-def tfim(n, J=1.0, h=1.0):
-    H = [(-J, [(i, Z), (i + 1, Z)]) for i in range(n - 1)]
-    return H + [(-h, [(i, X)]) for i in range(n)]
+    return hea_ansatz(qn.ACircuit, n, layers, theta)
 
 
 # ---------- 1. gradient error vs budget ----------
@@ -66,22 +53,6 @@ def train(levels, steps=120, lr=0.1):
         th -= lr * np.array(grad)
     val, _, _ = build(nv, lv, th).value_and_grad_q(Hv, 0)
     return val
-
-
-# exact ground energy
-def exact_ground(n, H):
-    dim = 1 << n
-    M = np.zeros((dim, dim), dtype=complex)
-    sx = np.array([[0, 1], [1, 0]], complex)
-    sz = np.array([[1, 0], [0, -1]], complex)
-    P = {X: sx, Z: sz}
-    for coeff, ops in H:
-        term = np.array([[1]], complex)
-        mats = {w: P[p] for w, p in ops}
-        for q in range(n):
-            term = np.kron(mats.get(q, np.eye(2)), term)
-        M += coeff * term
-    return float(np.min(np.linalg.eigvalsh(M)))
 
 
 e0 = exact_ground(nv, Hv)

@@ -13,33 +13,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 import qubit_native as qn
 import qubit_gpu_native as qg
+from vqe_helpers import hea_ansatz, tfim
 
-X, Y, Z = 1, 2, 3
 fails = 0
-
-
-def build(mod, n, layers, theta):
-    c = mod(n); p = 0
-    for _ in range(layers):
-        for q in range(n):
-            c.rot(Y, q, float(theta[p]), True, p); p += 1
-            c.rot(Z, q, float(theta[p]), True, p); p += 1
-        for q in range(n):
-            c.cfixed([q], (q + 1) % n, 0, 1, 1, 0)
-    return c
-
-
-def tfim(n):
-    return ([(-1.0, [(i, Z), (i + 1, Z)]) for i in range(n - 1)]
-            + [(-1.0, [(i, X)]) for i in range(n)])
-
-
 rng = np.random.default_rng(3)
 for n, L in [(4, 2), (6, 3), (8, 3), (10, 3)]:
     th = rng.uniform(-math.pi, math.pi, L * n * 2)
     H = tfim(n)
-    _, gc = build(qn.ACircuit, n, L, th).value_and_grad(H)
-    _, gq, D = build(qg.GPUCircuitQ, n, L, th).value_and_grad(H)
+    _, gc = hea_ansatz(qn.ACircuit, n, L, th).value_and_grad(H)
+    _, gq, D = hea_ansatz(qg.GPUCircuitQ, n, L, th).value_and_grad(H)
     gc, gq = np.array(gc), np.array(gq)
     cos = float(np.dot(gc, gq) / (np.linalg.norm(gc) * np.linalg.norm(gq) + 1e-12))
     ok = cos > 0.99

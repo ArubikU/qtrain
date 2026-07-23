@@ -19,37 +19,11 @@ import sys, os, math, time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 import qubit_native as qn
-
-X, Y, Z = 1, 2, 3
+from vqe_helpers import hea_ansatz, tfim, exact_ground
 
 
 def build(n, layers, theta):
-    c = qn.ACircuit(n); p = 0
-    for _ in range(layers):
-        for q in range(n):
-            c.rot(Y, q, float(theta[p]), True, p); p += 1
-            c.rot(Z, q, float(theta[p]), True, p); p += 1
-        for q in range(n):
-            c.cfixed([q], (q + 1) % n, 0, 1, 1, 0)
-    return c
-
-
-def tfim(n):
-    H = [(-1.0, [(i, Z), (i + 1, Z)]) for i in range(n - 1)]
-    return H + [(-1.0, [(i, X)]) for i in range(n)]
-
-
-def exact_ground(n, H):
-    dim = 1 << n
-    M = np.zeros((dim, dim), dtype=complex)
-    P = {X: np.array([[0, 1], [1, 0]], complex), Z: np.array([[1, 0], [0, -1]], complex)}
-    for coeff, ops in H:
-        mats = {w: P[p] for w, p in ops}
-        term = np.array([[1]], complex)
-        for q in range(n):
-            term = np.kron(mats.get(q, np.eye(2)), term)
-        M += coeff * term
-    return float(np.min(np.linalg.eigvalsh(M)))
+    return hea_ansatz(qn.ACircuit, n, layers, theta)
 
 
 def train(n, layers, H, levels, steps, lr=0.08, seed=1):

@@ -12,8 +12,8 @@ import sys, os, math
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 import qubit_native as qn
+from vqe_helpers import hea_ansatz, tfim
 
-X, Y, Z = 1, 2, 3
 fails = 0
 
 
@@ -23,27 +23,11 @@ def rep(ok, msg):
     print(f"[{'PASS' if ok else 'FAIL'}] {msg}")
 
 
-def build(n, layers, theta):
-    c = qn.ACircuit(n); p = 0
-    for _ in range(layers):
-        for q in range(n):
-            c.rot(Y, q, float(theta[p]), True, p); p += 1
-            c.rot(Z, q, float(theta[p]), True, p); p += 1
-        for q in range(n):
-            c.cfixed([q], (q + 1) % n, 0, 1, 1, 0)
-    return c
-
-
-def tfim(n):
-    H = [(-1.0, [(i, Z), (i + 1, Z)]) for i in range(n - 1)]
-    return H + [(-1.0, [(i, X)]) for i in range(n)]
-
-
 n, layers = 8, 3
 rng = np.random.default_rng(7)
 theta = rng.uniform(-math.pi, math.pi, layers * n * 2)
 H = tfim(n)
-c = build(n, layers, theta)
+c = hea_ansatz(qn.ACircuit, n, layers, theta)
 
 v0, g0, D0 = c.value_and_grad_q(H, 0)
 _, gref = c.value_and_grad(H)
@@ -53,8 +37,7 @@ g0, gref = np.array(g0), np.array(gref)
 rep(np.max(np.abs(g0 - gref)) < 1e-14 and D0 == 0.0, "levels=0 reproduces exact adjoint gradient")
 
 # b) + c) bound and linearity
-ratios = []
-bound_ok = True
+ratios, bound_ok = [], True
 for levels in [4, 8, 16, 32, 64, 256, 1024]:
     _, gq, D = c.value_and_grad_q(H, levels)
     err = np.max(np.abs(np.array(gq) - g0))
@@ -73,13 +56,12 @@ t0 = rng.uniform(-0.1, 0.1, lv * nv * 2)
 def train(levels, steps=100, lr=0.1):
     th = t0.copy()
     for _ in range(steps):
-        _, grad, _ = build(nv, lv, th).value_and_grad_q(Hv, levels)
+        _, grad, _ = hea_ansatz(qn.ACircuit, nv, lv, th).value_and_grad_q(Hv, levels)
         th -= lr * np.array(grad)
-    return build(nv, lv, th).value_and_grad_q(Hv, 0)[0]
+    return hea_ansatz(qn.ACircuit, nv, lv, th).value_and_grad_q(Hv, 0)[0]
 
 
-e_ex = train(0)
-e_c = train(256)
+e_ex, e_c = train(0), train(256)
 rep(abs(e_c - e_ex) < 1e-2, f"levels=256 training matches exact-grad (E={e_c:.4f} vs {e_ex:.4f})")
 
 print("\n" + ("ALL TESTS PASSED" if fails == 0 else f"{fails} TEST(S) FAILED"))

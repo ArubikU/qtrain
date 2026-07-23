@@ -13,24 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 import qubit_native as qn
 import qubit_gpu_native as qg
-
-X, Y, Z = 1, 2, 3
-
-
-def build(mod, n, layers, theta):
-    c = mod(n); p = 0
-    for _ in range(layers):
-        for q in range(n):
-            c.rot(Y, q, float(theta[p]), True, p); p += 1
-            c.rot(Z, q, float(theta[p]), True, p); p += 1
-        for q in range(n):
-            c.cfixed([q], (q + 1) % n, 0, 1, 1, 0)
-    return c
-
-
-def tfim(n):
-    H = [(-1.0, [(i, Z), (i + 1, Z)]) for i in range(n - 1)]
-    return H + [(-1.0, [(i, X)]) for i in range(n)]
+from vqe_helpers import hea_ansatz as build, tfim
 
 
 def timed(fn, reps=3):

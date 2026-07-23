@@ -146,8 +146,9 @@ Validate the hard assumption before investing in ecosystem:
 - [ ] 30-32q: tiered blocks (ZERO tier for near-empty blocks) over uniform
       int16 — the sparse-block win for the last 1-3 qubits. Larger
       subsystem (block classification + dynamic tiers).
-- [ ] T4 free-cloud replication of the GPU results (reproducibility for
-      paper 2). Noted for a later session.
+- [~] T4 free-cloud replication: tooling ready (bindings/build_gpu.sh,
+      bench/phase4_t4.py, COLAB.md — GPU module is self-contained, no
+      parent header needed). Just needs a Colab run on a T4.
 - [ ] Release qtrain 1.0 + plugin on PyPI (with Phase 1's deferred CI).
 
 ### Phase 5 — Stretch (M12+)
@@ -160,14 +161,23 @@ Validate the hard assumption before investing in ecosystem:
 
 ```
 qtrain/
-├── src/        C++ additions to the engine: adjoint pass, compressed
-│               checkpointing (builds against ../include/qubit)
-├── python/     pybind11 bindings (qubit_py module)
-├── plugin/     pennylane-qubit device (pure Python, depends on python/)
-├── theory/     gradient-bound notes -> paper 2 material
-├── bench/      gradient benchmarks vs Lightning/Aer; training curves
-└── spike/      Phase 0 risk spike (throwaway allowed)
+├── src/            adjoint.h (CPU: CircuitBuilder base + ACircuit executor,
+│                   exact + compressed) and adjoint_gpu.cu (CUDA GPUCircuit
+│                   dense + GPUCircuitQ int16, same builder base)
+├── bindings/       pybind11 module qubit_py.cpp (qubit_native); build.bat
+│                   (Windows cl), build_gpu.sh (Linux/Colab nvcc)
+├── pennylane_qubit/ the qubit.simulator device (analytic, shots, adjoint)
+├── vqe_helpers.py  shared ansatz / TFIM / exact-ground for tests & benches
+├── theory/         gradient-bound notes -> paper 2 material
+├── bench/          grad_scaling, phase3_compression, phase4_demo/gpu/t4
+├── tests/          device, adjoint (native/device), compression, gpu
+├── paper2/         paper 2 outline (claims mapped to artifacts)
+└── spike/          Phase 0 risk spike (kept for provenance)
 ```
+
+SOLID/DRY: one `CircuitBuilder` records the gate list; CPU and GPU
+executors inherit it and add only their run logic (single responsibility).
+One `vqe_helpers` defines the ansatz/Hamiltonian for every test and bench.
 
 Engine changes land in qubit (parent repo) only when stable; qtrain
 pins a qubit version. This subrepo is its own git repository.
