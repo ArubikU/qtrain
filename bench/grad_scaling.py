@@ -51,12 +51,25 @@ def time_grad(dev, diff, n, layers, reps=3):
     return (time.perf_counter() - t0) / reps
 
 
-print(f"{'n':>3} {'L':>3} {'P':>5}  {'adjoint(ms)':>12} {'pshift(ms)':>12} {'speedup':>8}")
-for n, layers in [(4, 2), (6, 3), (8, 3), (10, 4), (12, 4)]:
-    P = layers * n * 2
-    dev = QubitDevice(wires=n)
-    ta = time_grad(dev, "adjoint", n, layers) * 1e3
-    tp = time_grad(QubitDevice(wires=n), "parameter-shift", n, layers) * 1e3
-    print(f"{n:>3} {layers:>3} {P:>5}  {ta:>12.1f} {tp:>12.1f} {tp/ta:>7.1f}x")
+def maybe_lightning(n):
+    try:
+        return qml.device("lightning.qubit", wires=n)
+    except Exception:
+        return None
 
-print("\nadjoint: 2 passes regardless of P; parameter-shift: 2P evaluations.")
+
+print(f"{'n':>3} {'L':>3} {'P':>5}  {'qubit-adj(ms)':>14} {'qubit-pshift(ms)':>16} "
+      f"{'light-adj(ms)':>14} {'vs pshift':>10} {'vs light':>9}")
+for n, layers in [(4, 2), (6, 3), (8, 3), (10, 4), (12, 4), (14, 4)]:
+    P = layers * n * 2
+    ta = time_grad(QubitDevice(wires=n), "adjoint", n, layers) * 1e3
+    tp = time_grad(QubitDevice(wires=n), "parameter-shift", n, layers) * 1e3
+    ld = maybe_lightning(n)
+    tl = time_grad(ld, "adjoint", n, layers) * 1e3 if ld is not None else float("nan")
+    vs_l = f"{tl/ta:.2f}x" if tl == tl else "n/a"    # >1 => we are faster
+    print(f"{n:>3} {layers:>3} {P:>5}  {ta:>14.1f} {tp:>16.1f} {tl:>14.1f} "
+          f"{tp/ta:>9.1f}x {vs_l:>9}")
+
+print("\nqubit-adj: 2 passes regardless of P; parameter-shift: 2P evaluations.")
+print("'vs light' > 1 means qubit adjoint is faster than lightning adjoint;")
+print("< 1 means lightning is faster (expected — its dense kernels are tuned).")

@@ -90,11 +90,15 @@ Validate the hard assumption before investing in ecosystem:
 - [x] Scaling benchmark (`bench/grad_scaling.py`): adjoint is 2 passes vs
       parameter-shift's 2P; measured 21x (16 params) -> 133x (96 params)
       speedup, advantage growing with P as predicted.
-- [ ] Head-to-head vs PennyLane-Lightning adjoint (fair C++-vs-C++
-      dense). Deferred: current param-shift baseline is our own device
-      (Python-heavy), so the 20-133x is algorithmic, not a kernel claim.
-      The honest competitive number needs Lightning installed; nice-to-
-      have, not on the Phase 3 critical path.
+- [x] Head-to-head vs PennyLane-Lightning adjoint (same qml.grad path,
+      complex128). Result: same order of magnitude — roughly parity at
+      <=10q, ~3-6x slower at 12-14q (measurement noisy). No performance
+      cliff; dense adjoint is table stakes and we clear it within a small
+      constant factor. This matters because the winning axis is Phase 4:
+      Lightning OOMs at ~30q dense, qubit trains there via compression, so
+      "a few x slower per gradient but runs where Lightning can't" is the
+      deliberate trade. The 20-133x vs our own param-shift stands as the
+      algorithmic (2 vs 2P) result, not a kernel claim.
 
 ### Phase 3 — Gradients through compression + theory (M4-7) [CORE]
 - Adjoint through tiered states: forward pass stores compressed
