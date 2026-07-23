@@ -118,13 +118,22 @@ Validate the hard assumption before investing in ecosystem:
       engine integration (Phase 4).
 
 ### Phase 4 — Killer demo + paper 2 (M7-11)
-- Train VQE (e.g. transverse-field Ising ground state) and QAOA
-  (MaxCut) at 28-32 qubits on the RTX 3060; replicate on free-cloud T4.
-- Baselines: Lightning/Aer wherever they fit; document where they OOM.
-- Paper 2: "Error-Bounded Gradients Through Lossy Quantum Simulation"
-  (working title) -> QCE full paper or ICS; reuse the peer-review
-  pipeline from paper 1.
-- Release qtrain 1.0 + plugin on PyPI.
+- [x] Training demo (CPU, `bench/phase4_demo.py`): compressed-gradient VQE
+      reaches the same energy as exact-gradient training (difference 6e-5
+      at a fine budget, n=10 vs exact ground); a 16-qubit VQE trains end to
+      end (~11 s, energy decreasing monotonically). Proves the loop and the
+      fidelity at hardware-available scale.
+- [x] Capability crossover + memory model: int16 error-bounded storage
+      trains one qubit past Lightning's dense 6 GB ceiling (29 vs 28), with
+      the gradient bound.
+- [x] Paper 2 outline (`paper2/outline.md`): claims mapped to artifacts,
+      structure, figure status, and the honest GPU gap. Reuses paper 1's
+      peer-review pipeline.
+- [ ] GPU 28-32q VQE/QAOA on the RTX 3060 + T4 — the headline figure.
+      Needs adjoint + tiered-block storage ported into src/qubit_gpu.cu
+      (design proven on CPU; engineering, not research). See
+      paper2/outline.md "Remaining for the GPU demo".
+- [ ] Release qtrain 1.0 + plugin on PyPI (with Phase 1's deferred CI).
 
 ### Phase 5 — Stretch (M12+)
 - MPS backend behind the same plugin for low-entanglement ansatze.
