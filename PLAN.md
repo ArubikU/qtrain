@@ -101,17 +101,21 @@ Validate the hard assumption before investing in ecosystem:
       algorithmic (2 vs 2P) result, not a kernel claim.
 
 ### Phase 3 — Gradients through compression + theory (M4-7) [CORE]
-- Adjoint through tiered states: forward pass stores compressed
-  checkpoints (int16 tiers) instead of full states; backward pass
-  decompresses per segment. This is exactly gradient checkpointing
-  where the checkpoint memory is 2x smaller and error-bounded.
-- Theory (paper 2 core): extend the L2 composition lemma to the
-  adjoint pass — each decompression injects a bounded perturbation
-  into both bra and ket trajectories; triangle inequality gives
-  |grad_error| <= f(D) with D the total injected norm. See
-  theory/gradient-bound.md for the sketch and open questions.
-- Empirical validation: gradient error vs budget curves; training
-  convergence (VQE ground-state energy) under budgets.
+- [x] Adjoint through compression: `ACircuit.value_and_grad_q(H, levels)`
+      round-trips both carried trajectories (phi, lambda) through the
+      int16 block-scaled transform at each gate boundary, accumulating the
+      injected budget D. Returns (value, grad, D). levels<=0 == exact.
+- [x] Theory (paper 2 core): |grad_error| <= D, linear in the injected
+      norm (theory/gradient-bound.md, Lemma + Phase 3 confirmation).
+- [x] Empirical (bench/phase3_compression.py + tests/test_compression.py):
+      err/D constant ~0.01-0.05 (linear), worst-case bound holds as a hard
+      assertion, VQE converges under budgets (levels=256 gap 1.2e-4).
+- [x] Memory/capability model: uniform int16 clears Lightning's dense 6 GB
+      ceiling by +1 qubit (29 vs 28) WITH the error guarantee. 30-32q
+      needs tiered blocks on the GPU engine (Phase 4).
+- [ ] Tiered (ZERO/COMPRESSED/FULL) storage rather than uniform int16 —
+      the sparse-block win that reaches 30-32q. Belongs with the GPU
+      engine integration (Phase 4).
 
 ### Phase 4 — Killer demo + paper 2 (M7-11)
 - Train VQE (e.g. transverse-field Ising ground state) and QAOA

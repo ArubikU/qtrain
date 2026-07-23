@@ -24,6 +24,7 @@
 #include <cmath>
 #include <algorithm>
 #include <utility>
+#include <tuple>
 
 namespace qtrain {
 
@@ -123,6 +124,29 @@ inline double grad_term(const Vec& lambda, const Vec& phi, int q, int gen) {
 	return im;
 }
 
+/* int16-tier block-scaled quantization round-trip (the COMPRESSED tier's
+   exact transform). `levels` sets coarseness: fine ~32767 == int16, coarse
+   == small. Models storing the trajectory compressed and reading it back;
+   returns the injected L2 norm (the per-boundary budget contribution). */
+inline double quantize_roundtrip(Vec& s, int levels) {
+	double mx = 0;
+	for (auto& z : s) { mx = std::max(mx, std::fabs(z.real())); mx = std::max(mx, std::fabs(z.imag())); }
+	if (mx == 0) return 0;
+	const double scale = mx / levels;
+	const long long N = (long long)s.size();
+	cd* p = s.data();
+	double err2 = 0;
+	#pragma omp parallel for schedule(static) reduction(+:err2)
+	for (long long i = 0; i < N; i++) {
+		double re = std::round(p[i].real() / scale) * scale;
+		double im = std::round(p[i].imag() / scale) * scale;
+		double dr = p[i].real() - re, di = p[i].imag() - im;
+		err2 += dr * dr + di * di;
+		p[i] = cd(re, im);
+	}
+	return std::sqrt(err2);
+}
+
 /* ---- Hamiltonian: weighted sum of Pauli strings ---- */
 /* pauli code per (wire): GEN_X/Y/Z */
 struct Term { double coeff; std::vector<std::pair<int, int>> ops; };
@@ -204,6 +228,33 @@ public:
 			apply_gate_inv(lambda, g);
 		}
 		return {value, grad};
+	}
+
+	/* Phase 3 [CORE]: adjoint where the carried trajectories (phi, lambda)
+	   are round-tripped through int16 compression at each gate boundary.
+	   Returns (value, grad, D) with D the total injected L2 norm — the
+	   budget the paper-2 bound relates to the gradient error. levels<=0
+	   reduces to the exact value_and_grad. */
+	std::tuple<double, std::vector<double>, double>
+	value_and_grad_q(const Ham& H, int levels) const {
+		Vec psi = forward();
+		double value = energy(psi, H);
+		Vec lambda = apply_ham(psi, H);
+		Vec phi = std::move(psi);
+		double D = 0;
+		std::vector<double> grad(nparams_, 0.0);
+		for (int k = int(gates_.size()) - 1; k >= 0; k--) {
+			const AGate& g = gates_[k];
+			if (g.param && g.pidx >= 0)
+				grad[g.pidx] = grad_term(lambda, phi, g.q, g.gen);
+			apply_gate_inv(phi, g);
+			apply_gate_inv(lambda, g);
+			if (levels > 0) {
+				D += quantize_roundtrip(phi, levels);
+				D += quantize_roundtrip(lambda, levels);
+			}
+		}
+		return {value, grad, D};
 	}
 
 private:

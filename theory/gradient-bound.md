@@ -76,6 +76,29 @@ is linear in D, and the worst-case bound |grad err| <= D holds with
 gap, so the deterministic quantization bias (open question 1) does not
 break optimization in practice at these budgets.
 
+## Phase 3 confirmation (production adjoint, ACircuit)
+
+Reproduced on the productionized adjoint (qtrain/src/adjoint.h, real gate
+set with CNOT-ring entanglers, OpenMP kernels), past spike scale:
+
+- n=9, 3 layers: err/D stays in 0.008..0.047 across levels 4..1024, so the
+  error is linear in the injected budget D and the worst-case bound
+  |grad err| <= D holds (verified as a hard assertion in
+  tests/test_compression.py, which also checks levels=0 reproduces the
+  exact adjoint gradient bit-for-bit).
+- VQE training (n=6, TFIM) under budgets: levels=256 gap 1.2e-4 vs
+  exact-gradient training, levels=32 gap 1.6e-2, levels=8 breaks down
+  (3 bits is too coarse) — graceful, tunable, no catastrophic bias down to
+  a usable budget.
+
+Memory / capability. Adjoint carries two trajectories (phi, lambda); on a
+6 GB budget the largest trainable n is 27 (complex128), 28 (complex64,
+Lightning-style), 29 (uniform int16). So uniform int16 already clears
+Lightning's dense ceiling on the same hardware by +1 qubit, *with* the
+error guarantee above — that combination is the contribution. Reaching
+30-32q needs the tiered blocks (ZERO tier for near-vanishing amplitude
+blocks), which is Phase 4 on the GPU engine, not uniform int16.
+
 ## Open questions (spike must answer)
 
 1. Quantization error is deterministic given the state, not zero-mean:

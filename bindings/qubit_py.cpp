@@ -117,5 +117,17 @@ PYBIND11_MODULE(qubit_native, m) {
 		     },
 		     py::arg("hamiltonian"),
 		     "Return (<psi|H|psi>, gradient over trainable params) via adjoint.\n"
-		     "hamiltonian: list of (coeff, [(wire, pauli)]); pauli 1=X 2=Y 3=Z.");
+		     "hamiltonian: list of (coeff, [(wire, pauli)]); pauli 1=X 2=Y 3=Z.")
+		.def("value_and_grad_q",
+		     [](const ACircuit& c,
+		        const std::vector<std::pair<double, std::vector<std::pair<int, int>>>>& terms,
+		        int levels) {
+			     qtrain::Ham H;
+			     for (auto& t : terms) H.push_back({t.first, t.second});
+			     return c.value_and_grad_q(H, levels);
+		     },
+		     py::arg("hamiltonian"), py::arg("levels"),
+		     "Adjoint through int16 compression: returns (value, grad, D) where\n"
+		     "D is the total injected L2 norm (compression budget). levels<=0\n"
+		     "gives the exact result.");
 }
