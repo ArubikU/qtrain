@@ -5,24 +5,38 @@ The GPU module (`qubit_gpu_native`) is self-contained: it only needs
 `bench/phase4_t4.py` — not the parent `qubit` engine header. So you can run
 the headline on a free Colab T4 (16 GB) without cloning the whole repo.
 
-## 1. Get the files into Colab
+Runtime must be **GPU (T4)**: Runtime → Change runtime type → T4.
 
-Easiest: put the `qtrain/` folder in your Google Drive (e.g.
-`MyDrive/qtrain`), then in a Colab cell:
+## Turnkey — paste one cell, it does everything
 
-```python
-from google.colab import drive
-drive.mount('/content/drive')
-%cd /content/drive/MyDrive/qtrain
+qtrain is a private repo, so set a GitHub token (any PAT with `repo`
+scope) on the first line. If you make the repo public, leave the token
+empty and it falls back to an anonymous clone.
+
+```bash
+%%bash
+GH_TOKEN=""   # <-- paste a GitHub PAT for the private repo, or leave empty if public
+git clone --quiet https://${GH_TOKEN}@github.com/ArubikU/qtrain.git 2>/dev/null \
+  || git clone --quiet https://github.com/ArubikU/qtrain.git
+cd qtrain
+pip -q install pybind11 numpy
+nvcc -O2 -std=c++17 -arch=sm_75 --shared -Xcompiler "-fPIC -fopenmp -DNDEBUG" \
+    $(python3 -m pybind11 --includes) -I src \
+    src/adjoint_gpu.cu -o qubit_gpu_native$(python3-config --extension-suffix)
+python bench/phase4_t4.py
 ```
 
-(If you later push `qtrain` to its own GitHub repo, replace the two lines
-above with `!git clone <url> && %cd qtrain`.)
+`-arch=sm_75` is the T4 (Turing). Other cards: A100 `sm_80`, L4 `sm_89`,
+RTX 30xx `sm_86`.
 
-## 2. Build + run — one cell
+## Alternative: Google Drive (no token)
 
-Colab runtime must be **GPU (T4)**: Runtime → Change runtime type → T4.
+Put the `qtrain/` folder in `MyDrive`, then:
 
+```python
+from google.colab import drive; drive.mount('/content/drive')
+%cd /content/drive/MyDrive/qtrain
+```
 ```bash
 !pip -q install pybind11 numpy
 !nvcc -O2 -std=c++17 -arch=sm_75 --shared -Xcompiler "-fPIC -fopenmp -DNDEBUG" \
@@ -30,9 +44,6 @@ Colab runtime must be **GPU (T4)**: Runtime → Change runtime type → T4.
     src/adjoint_gpu.cu -o qubit_gpu_native$(python3-config --extension-suffix)
 !python bench/phase4_t4.py
 ```
-
-`-arch=sm_75` is the T4 (Turing). For other cards: A100 `sm_80`,
-L4 `sm_89`, RTX 30xx `sm_86`.
 
 ## What it shows
 

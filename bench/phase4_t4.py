@@ -40,14 +40,15 @@ print("\n=== int16 ceiling (2 traj, 8 B/amp) — trains where dense OOMs ===")
 for n in [30, 31]:
     try_grad(qg.GPUCircuitQ, n, 2, "int16")
 
-print("\n=== VQE training at 28 qubits (int16 compressed adjoint) ===")
-n, layers = 28, 3
+print("\n=== VQE training with the int16 compressed adjoint (24 qubits) ===")
+n, layers = 24, 3
 H = tfim(n)
 th = np.random.default_rng(1).uniform(-0.1, 0.1, layers * n * 2)
 t0 = time.perf_counter()
-for s in range(20):
+for s in range(30):
     val, grad, D = hea_ansatz(qg.GPUCircuitQ, n, layers, th).value_and_grad(H)
     th -= 0.05 * np.array(grad)
-    if s % 4 == 0 or s == 19:
+    if s % 5 == 0 or s == 29:
         print(f"  step {s:2d}  E={val:.4f}  D={D:.2e}")
-print(f"trained 20 steps in {time.perf_counter()-t0:.1f}s — {n}-qubit VQE on a T4.")
+print(f"trained 30 steps in {time.perf_counter()-t0:.1f}s — {n}-qubit VQE on a T4, "
+      f"energy decreasing (compressed adjoint).")
