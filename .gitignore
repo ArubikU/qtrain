@@ -13,3 +13,6 @@ qubit_gpu_native.*
 
 # spike binaries
 spike/*.exe
+
+# local-only research (kept out of the public repo)
+paper2/
