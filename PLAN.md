@@ -74,12 +74,27 @@ Validate the hard assumption before investing in ecosystem:
   both analytic and finite-shot modes.
 
 ### Phase 2 — Adjoint differentiation, dense (M3-4)
-- Adjoint method (Jones & Gacon 2020 style) in the C++ engine:
-  backward pass applying U_k^dagger while propagating the observable.
-- Wire into the PennyLane device as `diff_method="adjoint"`.
-- Benchmark gradients/second vs PennyLane-Lightning CPU (and GPU where
-  it fits) at 20-26q. Target: competitive dense, not necessarily
-  faster — dense adjoint is table stakes, not the contribution.
+- [x] Adjoint method (Jones & Gacon 2020) as `qtrain/src/adjoint.h`
+      (dense complex128, header-only, namespace qtrain): forward +
+      backward pass applying U_k^dagger to both bra/ket trajectories,
+      gradient from the generator factor. Built around apply / apply_inv
+      / generator / dot so Phase 3 can swap in compressed checkpoints.
+- [x] Bound into `qubit_native` as `ACircuit.value_and_grad(H)`; native
+      test (`tests/test_adjoint_native.py`) matches parameter-shift to
+      7.8e-16 over random ansaetze.
+- [x] Wired into the device as `diff_method="adjoint"` via the modern
+      device-derivative hooks (setup_execution_config +
+      preprocess_transforms + compute_derivatives). `tests/
+      test_adjoint_device.py`: gradient matches default.qubit param-shift
+      to 5e-16; VQE trains identically (gap 2e-7).
+- [x] Scaling benchmark (`bench/grad_scaling.py`): adjoint is 2 passes vs
+      parameter-shift's 2P; measured 21x (16 params) -> 133x (96 params)
+      speedup, advantage growing with P as predicted.
+- [ ] Head-to-head vs PennyLane-Lightning adjoint (fair C++-vs-C++
+      dense). Deferred: current param-shift baseline is our own device
+      (Python-heavy), so the 20-133x is algorithmic, not a kernel claim.
+      The honest competitive number needs Lightning installed; nice-to-
+      have, not on the Phase 3 critical path.
 
 ### Phase 3 — Gradients through compression + theory (M4-7) [CORE]
 - Adjoint through tiered states: forward pass stores compressed
@@ -148,9 +163,12 @@ pins a qubit version. This subrepo is its own git repository.
 
 ## Immediate next action
 
-Phase 2: adjoint differentiation in the C++ engine, wired into the device
-as `diff_method="adjoint"`. The spike already proved the adjoint math
-(spike/adjoint_spike.cpp); Phase 2 moves it from throwaway into qubit's
-backend and exposes it through `qubit_native` + the device, replacing the
-param-shift fallback the device uses today. Then Phase 3 layers the
-compressed checkpoints (the core contribution) on top.
+Phase 3 [CORE]: gradients through compression. adjoint.h's backward pass
+already isolates the four state ops (apply / apply_inv / generator / dot)
+and the two carried trajectories (phi, lambda). Phase 3 stores those
+trajectories as int16-tier compressed checkpoints and round-trips them per
+segment, injecting a bounded perturbation whose effect on the gradient is
+the paper-2 bound (theory/gradient-bound.md, already spike-validated).
+Build: a compressed StateStore behind the same adjoint loop, budget knob D,
+gradient-error-vs-D and training-convergence curves. This is the
+contribution; everything so far was the substrate to reach it.

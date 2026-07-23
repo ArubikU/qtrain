@@ -16,6 +16,7 @@
 #include <pybind11/complex.h>
 
 #include "qubit/qubit.h"
+#include "../src/adjoint.h"
 
 namespace py = pybind11;
 using namespace qubit;
@@ -90,4 +91,31 @@ PYBIND11_MODULE(qubit_native, m) {
 
 	m.def("run", &run, py::arg("circuit"), py::arg("options") = RunOptions(),
 	      "Analyze the circuit, pick a backend, execute, return a Result.");
+
+	/* ---- adjoint differentiation (qtrain::ACircuit) ---- */
+	using qtrain::ACircuit;
+	using cdd = std::complex<double>;
+	py::class_<ACircuit>(m, "ACircuit")
+		.def(py::init<int>(), py::arg("num_qubits"))
+		.def_property_readonly("num_qubits", &ACircuit::num_qubits)
+		.def_property_readonly("num_params", &ACircuit::num_params)
+		.def("rot", &ACircuit::rot,
+		     py::arg("gen"), py::arg("q"), py::arg("theta"),
+		     py::arg("trainable"), py::arg("slot"),
+		     "Parametric rotation exp(-i theta G/2); gen 1=X 2=Y 3=Z.")
+		.def("fixed", &ACircuit::fixed,
+		     py::arg("q"), py::arg("m00"), py::arg("m01"), py::arg("m10"), py::arg("m11"))
+		.def("cfixed", &ACircuit::cfixed,
+		     py::arg("ctrl"), py::arg("q"),
+		     py::arg("m00"), py::arg("m01"), py::arg("m10"), py::arg("m11"))
+		.def("value_and_grad",
+		     [](const ACircuit& c,
+		        const std::vector<std::pair<double, std::vector<std::pair<int, int>>>>& terms) {
+			     qtrain::Ham H;
+			     for (auto& t : terms) H.push_back({t.first, t.second});
+			     return c.value_and_grad(H);
+		     },
+		     py::arg("hamiltonian"),
+		     "Return (<psi|H|psi>, gradient over trainable params) via adjoint.\n"
+		     "hamiltonian: list of (coeff, [(wire, pauli)]); pauli 1=X 2=Y 3=Z.");
 }
