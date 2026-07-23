@@ -1,0 +1,14 @@
+# build artifacts
+*.pyd
+*.obj
+*.lib
+*.exp
+*.dll
+*.exe
+build/
+__pycache__/
+*.pyc
+qubit_native.*
+
+# spike binaries
+spike/*.exe

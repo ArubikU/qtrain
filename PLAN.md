@@ -48,11 +48,23 @@ Validate the hard assumption before investing in ecosystem:
   which inherits the state bound trivially but costs 2P executions).
 
 ### Phase 1 — Python bindings + minimal PennyLane device (M1-2)
-- pybind11 wrapper over qubit's public API (Circuit, run, Result).
-- `pennylane-qubit` device implementing PennyLane's Device API:
-  qubit-dense backend, finite-shot and analytic modes.
-- CI wheel build (Windows + Linux). First external-usable artifact.
-- Deliverable: `pip install`, run any PennyLane tutorial on qubit.
+- [x] pybind11 wrapper over qubit's public API (Circuit, run, Result) —
+      `bindings/qubit_py.cpp` -> `qubit_native` module, built via
+      `bindings/build.bat` (direct cl; setuptools misses the 2019
+      BuildTools install). Bell/expectation smoke-tested.
+- [x] `pennylane-qubit` device (`qubit.simulator`) on PennyLane's modern
+      Device API — analytic mode: expval (Pauli/tensor/Hamiltonian via
+      pauli_sentence + basis rotation), state, probs. Gate decomposition
+      to the native set through `devices.preprocess.decompose`.
+- [x] Correctness gate: `tests/test_device.py` — 6/6 match default.qubit
+      to ~1e-8 (incl. Rot-decomposition path).
+- [x] Trainability gate: `examples/vqe_train.py` — a GradientDescent
+      optimizer drives a TFIM VQE on `qubit.simulator` to the SAME energy
+      as default.qubit (param-shift through the device). End-to-end proof.
+- [ ] Finite-shot / sampling mode (SampleMP, CountsMP). Deferred.
+- [ ] CI wheel build (Windows + Linux), PyPI entry point. Deferred; entry
+      point declared in setup.py, currently used via direct import.
+- Deliverable (met, local): run a PennyLane VQE on the qubit engine.
 
 ### Phase 2 — Adjoint differentiation, dense (M3-4)
 - Adjoint method (Jones & Gacon 2020 style) in the C++ engine:
@@ -129,6 +141,9 @@ pins a qubit version. This subrepo is its own git repository.
 
 ## Immediate next action
 
-Phase 0 spike, step 1: adjoint differentiation on dense CPU, verified
-against parameter-shift. It answers the biggest unknown first and costs
-nothing if the route dies.
+Phase 2: adjoint differentiation in the C++ engine, wired into the device
+as `diff_method="adjoint"`. The spike already proved the adjoint math
+(spike/adjoint_spike.cpp); Phase 2 moves it from throwaway into qubit's
+backend and exposes it through `qubit_native` + the device, replacing the
+param-shift fallback the device uses today. Then Phase 3 layers the
+compressed checkpoints (the core contribution) on top.
