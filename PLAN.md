@@ -160,10 +160,12 @@ Validate the hard assumption before investing in ecosystem:
 ## Architecture
 
 ```
-qtrain/
-├── src/            adjoint.h (CPU: CircuitBuilder base + ACircuit executor,
-│                   exact + compressed) and adjoint_gpu.cu (CUDA GPUCircuit
-│                   dense + GPUCircuitQ int16, same builder base)
+qtrain/                 (git submodule -> github.com/ArubikU/qtrain)
+├── src/            circuit.h (shared data model: AGate/Ham/CircuitBuilder),
+│                   adjoint.h (CPU ACircuit — runs ON qubit's DenseCPUT
+│                   backend via apply()+buffer(); only H/dot/quantize are
+│                   qtrain arithmetic), adjoint_gpu.cu (CUDA GPUCircuit dense
+│                   + GPUCircuitQ int16, own kernels for now)
 ├── bindings/       pybind11 module qubit_py.cpp (qubit_native); build.bat
 │                   (Windows cl), build_gpu.sh (Linux/Colab nvcc)
 ├── pennylane_qubit/ the qubit.simulator device (analytic, shots, adjoint)
@@ -179,8 +181,13 @@ SOLID/DRY: one `CircuitBuilder` records the gate list; CPU and GPU
 executors inherit it and add only their run logic (single responsibility).
 One `vqe_helpers` defines the ansatz/Hamiltonian for every test and bench.
 
-Engine changes land in qubit (parent repo) only when stable; qtrain
-pins a qubit version. This subrepo is its own git repository.
+qtrain consumes the qubit library (header-only `include/qubit/qubit.h`).
+The CPU adjoint now evolves state through qubit's `DenseCPUT::apply()` and
+reads amplitudes via `buffer()` (added to qubit.h for this), so there is no
+second gate kernel on the CPU path. Remaining engine-side integration: the
+GPU adjoint still uses its own CUDA kernels; running it on qubit's GPU
+tiered-block backend is what reaches 30-32q (the sparse-block win). qtrain
+is a git submodule with its own history; engine additions land in qubit.
 
 ## Success metrics (honest)
 

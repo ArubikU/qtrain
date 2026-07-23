@@ -24,7 +24,7 @@
 #include <string>
 #include <cmath>
 
-#include "adjoint.h"   // qtrain::AGate, Gen, Term, Ham (host structs)
+#include "circuit.h"   // qtrain::AGate, Gen, Term, Ham, CircuitBuilder (no qubit.h)
 
 namespace py = pybind11;
 using qtrain::AGate; using qtrain::Ham; using qtrain::Term;
