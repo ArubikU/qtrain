@@ -10,6 +10,10 @@
  * Phase 3 can swap the dense std::vector for qubit's tiered-compressed
  * representation and store compressed checkpoints on the backward path.
  *
+ * Optimized: OpenMP over the 2^n hot loops (disjoint index pairs, safe to
+ * parallelize), and the per-parameter gradient is computed as a single fused
+ * <lambda|G|phi> pass with no state copy. Pragmas are no-ops without /openmp.
+ *
  * Header-only, namespace qtrain; no dependency on qubit.h. Driven from
  * Python via the qubit_native bindings (ACircuit + value_and_grad).
  */
@@ -54,15 +58,20 @@ inline void dagger(const cd in[4], cd out[4]) {
 
 /* apply a 2x2 on target q, conditioned on all control bits set */
 inline void apply_2x2(Vec& s, const std::vector<int>& ctrl, int q, const cd m[4]) {
-	uint64_t bit = 1ull << q, cmask = 0;
+	const uint64_t bit = 1ull << q;
+	uint64_t cmask = 0;
 	for (int cq : ctrl) cmask |= 1ull << cq;
-	for (uint64_t i = 0; i < s.size(); i++) {
+	const cd m0 = m[0], m1 = m[1], m2 = m[2], m3 = m[3];
+	const long long N = (long long)s.size();
+	cd* p = s.data();
+	#pragma omp parallel for schedule(static)
+	for (long long i = 0; i < N; i++) {
 		if (i & bit) continue;
 		if ((i & cmask) != cmask) continue;
 		uint64_t j = i | bit;
-		cd a = s[i], b = s[j];
-		s[i] = m[0] * a + m[1] * b;
-		s[j] = m[2] * a + m[3] * b;
+		cd a = p[i], b = p[j];
+		p[i] = m0 * a + m1 * b;
+		p[j] = m2 * a + m3 * b;
 	}
 }
 
@@ -78,14 +87,40 @@ inline void apply_gate_inv(Vec& s, const AGate& g) {
 
 /* Pauli generator G (no phase, no controls) — the dU/dtheta factor */
 inline void apply_generator(Vec& s, int q, int gen) {
-	uint64_t bit = 1ull << q;
-	for (uint64_t i = 0; i < s.size(); i++) {
+	const uint64_t bit = 1ull << q;
+	const long long N = (long long)s.size();
+	cd* p = s.data();
+	#pragma omp parallel for schedule(static)
+	for (long long i = 0; i < N; i++) {
 		if (i & bit) continue;
-		uint64_t j = i | bit; cd a = s[i], b = s[j];
-		if (gen == GEN_X) { s[i] = b; s[j] = a; }
-		else if (gen == GEN_Y) { s[i] = cd(0, -1) * b; s[j] = cd(0, 1) * a; }
-		else { s[j] = -b; }   /* Z */
+		uint64_t j = i | bit; cd a = p[i], b = p[j];
+		if (gen == GEN_X) { p[i] = b; p[j] = a; }
+		else if (gen == GEN_Y) { p[i] = cd(0, -1) * b; p[j] = cd(0, 1) * a; }
+		else { p[j] = -b; }   /* Z */
 	}
+}
+
+/* fused gradient inner product: Re( (-i/2) <lambda| G |phi> ) * 2, no copy.
+   iterate disjoint pairs (i, j=i|bit); accumulate conj(lambda)*(G phi). */
+inline double grad_term(const Vec& lambda, const Vec& phi, int q, int gen) {
+	const uint64_t bit = 1ull << q;
+	const long long N = (long long)phi.size();
+	const cd* L = lambda.data();
+	const cd* P = phi.data();
+	double re = 0, im = 0;   /* accumulate <lambda|G|phi> */
+	#pragma omp parallel for schedule(static) reduction(+:re,im)
+	for (long long i = 0; i < N; i++) {
+		if (i & bit) continue;
+		uint64_t j = i | bit;
+		cd acc;
+		if (gen == GEN_X)      acc = std::conj(L[i]) * P[j] + std::conj(L[j]) * P[i];
+		else if (gen == GEN_Y) acc = std::conj(L[i]) * (cd(0,-1) * P[j]) + std::conj(L[j]) * (cd(0,1) * P[i]);
+		else                   acc = std::conj(L[i]) * P[i] + std::conj(L[j]) * (-P[j]);
+		re += acc.real(); im += acc.imag();
+	}
+	/* g = 2 Re( (-i/2) * <lambda|G|phi> ) = Im(<lambda|G|phi>) */
+	(void)re;
+	return im;
 }
 
 /* ---- Hamiltonian: weighted sum of Pauli strings ---- */
@@ -93,23 +128,32 @@ inline void apply_generator(Vec& s, int q, int gen) {
 struct Term { double coeff; std::vector<std::pair<int, int>> ops; };
 using Ham = std::vector<Term>;
 
-inline Vec apply_term(const Vec& s, const Term& t) {
+inline void add_term_into(Vec& out, const Vec& s, const Term& t) {
 	Vec r = s;
 	for (auto& op : t.ops) apply_generator(r, op.first, op.second);
-	return r;
+	const long long N = (long long)out.size();
+	const double c = t.coeff;
+	cd* o = out.data(); const cd* rp = r.data();
+	#pragma omp parallel for schedule(static)
+	for (long long i = 0; i < N; i++) o[i] += c * rp[i];
 }
 inline double energy(const Vec& psi, const Ham& H) {
 	double e = 0;
 	for (auto& t : H) {
-		Vec ts = apply_term(psi, t); cd acc = 0;
-		for (uint64_t i = 0; i < psi.size(); i++) acc += std::conj(psi[i]) * ts[i];
-		e += t.coeff * acc.real();
+		Vec ts = psi;
+		for (auto& op : t.ops) apply_generator(ts, op.first, op.second);
+		const long long N = (long long)psi.size();
+		const cd* pp = psi.data(); const cd* tp = ts.data();
+		double re = 0;
+		#pragma omp parallel for schedule(static) reduction(+:re)
+		for (long long i = 0; i < N; i++) re += (std::conj(pp[i]) * tp[i]).real();
+		e += t.coeff * re;
 	}
 	return e;
 }
 inline Vec apply_ham(const Vec& psi, const Ham& H) {
 	Vec r(psi.size(), cd(0, 0));
-	for (auto& t : H) { Vec ts = apply_term(psi, t); for (uint64_t i = 0; i < r.size(); i++) r[i] += t.coeff * ts[i]; }
+	for (auto& t : H) add_term_into(r, psi, t);
 	return r;
 }
 
@@ -150,17 +194,12 @@ public:
 		Vec psi = forward();
 		double value = energy(psi, H);
 		Vec lambda = apply_ham(psi, H);
-		Vec phi = psi;
+		Vec phi = std::move(psi);
 		std::vector<double> grad(nparams_, 0.0);
 		for (int k = int(gates_.size()) - 1; k >= 0; k--) {
 			const AGate& g = gates_[k];
-			if (g.param && g.pidx >= 0) {
-				Vec mu = phi; apply_generator(mu, g.q, g.gen);
-				cd acc = 0;
-				for (uint64_t i = 0; i < mu.size(); i++) acc += std::conj(lambda[i]) * mu[i];
-				acc *= cd(0, -0.5);
-				grad[g.pidx] = 2.0 * acc.real();
-			}
+			if (g.param && g.pidx >= 0)
+				grad[g.pidx] = grad_term(lambda, phi, g.q, g.gen);
 			apply_gate_inv(phi, g);
 			apply_gate_inv(lambda, g);
 		}

@@ -10,7 +10,7 @@ set PYINC=C:\Users\ejane\AppData\Local\Programs\Python\Python312\Include
 set PYLIB=C:\Users\ejane\AppData\Local\Programs\Python\Python312\libs
 set PB11=C:\Users\ejane\AppData\Local\Programs\Python\Python312\Lib\site-packages\pybind11\include
 
-cl /nologo /LD /EHsc /std:c++17 /O2 /DNDEBUG ^
+cl /nologo /LD /EHsc /std:c++17 /O2 /DNDEBUG /openmp ^
    /I"%PYINC%" /I"%PB11%" /I"..\include" ^
    bindings\qubit_py.cpp ^
    /Fe:qubit_native.pyd ^
