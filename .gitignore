@@ -9,6 +9,7 @@ build/
 __pycache__/
 *.pyc
 qubit_native.*
+qubit_gpu_native.*
 
 # spike binaries
 spike/*.exe
