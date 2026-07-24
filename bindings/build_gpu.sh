@@ -10,13 +10,13 @@ EXT=$(python3-config --extension-suffix)
 
 echo ">> CPU module (qubit_native)"
 c++ -O3 -std=c++17 -fopenmp -shared -fPIC $PYINC \
-    -I ../include -I src \
+    -I ../include \
     bindings/qubit_py.cpp -o "qubit_native${EXT}"
 
 echo ">> GPU module (qubit_gpu_native), arch=${ARCH}"
 nvcc -O2 -std=c++17 -arch="${ARCH}" --shared \
     -Xcompiler "-fPIC -fopenmp -DNDEBUG" \
-    $PYINC -I ../include -I src \
-    src/adjoint_gpu.cu -o "qubit_gpu_native${EXT}"
+    $PYINC -I ../include \
+    bindings/qubit_gpu.cu -o "qubit_gpu_native${EXT}"
 
 echo ">> done: $(ls qubit_native${EXT} qubit_gpu_native${EXT})"

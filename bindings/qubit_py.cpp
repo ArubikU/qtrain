@@ -16,7 +16,7 @@
 #include <pybind11/complex.h>
 
 #include "qubit/qubit.h"
-#include "../src/adjoint.h"
+#include "qubit/adjoint.h"
 
 namespace py = pybind11;
 using namespace qubit;
@@ -92,8 +92,8 @@ PYBIND11_MODULE(qubit_native, m) {
 	m.def("run", &run, py::arg("circuit"), py::arg("options") = RunOptions(),
 	      "Analyze the circuit, pick a backend, execute, return a Result.");
 
-	/* ---- adjoint differentiation (qtrain::ACircuit) ---- */
-	using qtrain::ACircuit;
+	/* ---- adjoint differentiation (qubit::ACircuit) ---- */
+	using qubit::ACircuit;
 	using cdd = std::complex<double>;
 	py::class_<ACircuit>(m, "ACircuit")
 		.def(py::init<int>(), py::arg("num_qubits"))
@@ -111,7 +111,7 @@ PYBIND11_MODULE(qubit_native, m) {
 		.def("value_and_grad",
 		     [](const ACircuit& c,
 		        const std::vector<std::pair<double, std::vector<std::pair<int, int>>>>& terms) {
-			     qtrain::Ham H;
+			     qubit::Ham H;
 			     for (auto& t : terms) H.push_back({t.first, t.second});
 			     return c.value_and_grad(H);
 		     },
@@ -122,7 +122,7 @@ PYBIND11_MODULE(qubit_native, m) {
 		     [](const ACircuit& c,
 		        const std::vector<std::pair<double, std::vector<std::pair<int, int>>>>& terms,
 		        int levels) {
-			     qtrain::Ham H;
+			     qubit::Ham H;
 			     for (auto& t : terms) H.push_back({t.first, t.second});
 			     return c.value_and_grad_q(H, levels);
 		     },

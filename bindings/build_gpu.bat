@@ -12,8 +12,8 @@ set PB11=C:\Users\ejane\AppData\Local\Programs\Python\Python312\Lib\site-package
 
 %NVCC% -O2 -std=c++17 -arch=sm_86 --shared ^
    -Xcompiler "/openmp /EHsc /MD /utf-8 /DNDEBUG" ^
-   -I"%PYINC%" -I"%PB11%" -I"..\include" -I"src" ^
-   src\adjoint_gpu.cu ^
+   -I"%PYINC%" -I"%PB11%" -I"..\include" ^
+   bindings\qubit_gpu.cu ^
    -o qubit_gpu_native.pyd ^
    "%PYLIB%\python312.lib"
 exit /b %errorlevel%

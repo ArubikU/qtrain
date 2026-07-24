@@ -1,45 +1,40 @@
 # Running the GPU demo on a Colab T4
 
-The GPU module (`qubit_gpu_native`) is self-contained: it only needs
-`src/adjoint.h` + `src/adjoint_gpu.cu`, `vqe_helpers.py`, and
-`bench/phase4_t4.py` — not the parent `qubit` engine header. So you can run
-the headline on a free Colab T4 (16 GB) without cloning the whole repo.
+The engine (adjoint kernels) is part of the qubit library
+(`qubit/include/qubit/adjoint*.{h,cuh}`); qtrain is the implementation
+(bindings + PennyLane device). So the T4 build clones **qubit with its
+qtrain submodule** — one recursive clone brings both.
 
 Runtime must be **GPU (T4)**: Runtime → Change runtime type → T4.
 
 ## Turnkey — paste one cell, it does everything
 
-The repo is public, so no token needed.
+Public repos, no token. Clones qubit (the library) + qtrain (the impl,
+its submodule) and builds the GPU module against qubit's headers.
 
 ```bash
 %%bash
-git clone --quiet https://github.com/ArubikU/qtrain.git
-cd qtrain
+git clone --quiet --recurse-submodules https://github.com/ArubikU/qubit.git
+cd qubit/qtrain
 pip -q install pybind11 numpy
 nvcc -O2 -std=c++17 -arch=sm_75 --shared -Xcompiler "-fPIC -fopenmp -DNDEBUG" \
-    $(python3 -m pybind11 --includes) -I src \
-    src/adjoint_gpu.cu -o qubit_gpu_native$(python3-config --extension-suffix)
+    $(python3 -m pybind11 --includes) -I ../include \
+    bindings/qubit_gpu.cu -o qubit_gpu_native$(python3-config --extension-suffix)
 python bench/phase4_t4.py
 ```
 
 `-arch=sm_75` is the T4 (Turing). Other cards: A100 `sm_80`, L4 `sm_89`,
 RTX 30xx `sm_86`.
 
-## Alternative: Google Drive (no token)
+## Full build (CPU + GPU modules)
 
-Put the `qtrain/` folder in `MyDrive`, then:
+From `qubit/qtrain` after the recursive clone:
 
-```python
-from google.colab import drive; drive.mount('/content/drive')
-%cd /content/drive/MyDrive/qtrain
-```
 ```bash
-!pip -q install pybind11 numpy
-!nvcc -O2 -std=c++17 -arch=sm_75 --shared -Xcompiler "-fPIC -fopenmp -DNDEBUG" \
-    $(python3 -m pybind11 --includes) -I src \
-    src/adjoint_gpu.cu -o qubit_gpu_native$(python3-config --extension-suffix)
-!python bench/phase4_t4.py
+!bash bindings/build_gpu.sh sm_75   # builds qubit_native + qubit_gpu_native
 ```
+
+Other cards: A100 `sm_80`, L4 `sm_89`, RTX 30xx `sm_86`.
 
 ## What it shows
 

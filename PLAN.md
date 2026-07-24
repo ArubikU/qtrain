@@ -159,35 +159,34 @@ Validate the hard assumption before investing in ecosystem:
 
 ## Architecture
 
+The engine is the qubit LIBRARY; qtrain is the IMPLEMENTATION.
+
 ```
-qtrain/                 (git submodule -> github.com/ArubikU/qtrain)
-├── src/            circuit.h (shared data model: AGate/Ham/CircuitBuilder),
-│                   adjoint.h (CPU ACircuit — runs ON qubit's DenseCPUT
-│                   backend via apply()+buffer(); only H/dot/quantize are
-│                   qtrain arithmetic), adjoint_gpu.cu (CUDA GPUCircuit dense
-│                   + GPUCircuitQ int16, own kernels for now)
-├── bindings/       pybind11 module qubit_py.cpp (qubit_native); build.bat
-│                   (Windows cl), build_gpu.sh (Linux/Colab nvcc)
-├── pennylane_qubit/ the qubit.simulator device (analytic, shots, adjoint)
-├── vqe_helpers.py  shared ansatz / TFIM / exact-ground for tests & benches
-├── theory/         gradient-bound notes -> paper 2 material
-├── bench/          grad_scaling, phase3_compression, phase4_demo/gpu/t4
-├── tests/          device, adjoint (native/device), compression, gpu
-├── paper2/         paper 2 outline (claims mapped to artifacts)
-└── spike/          Phase 0 risk spike (kept for provenance)
+qubit/                             (library — github.com/ArubikU/qubit)
+├── include/qubit/
+│   ├── qubit.h          state-vector engine (+ DenseCPUT::buffer())
+│   ├── circuit.h        adjoint data model: AGate / Ham / CircuitBuilder
+│   ├── adjoint.h        CPU ACircuit — evolves via DenseCPUT::apply(),
+│   │                    reads buffer(); only H/dot/quantize are extra
+│   └── adjoint_gpu.cuh  CUDA GPUCircuit (dense) + GPUCircuitQ (int16)
+└── qtrain/                        (impl — submodule, github.com/ArubikU/qtrain)
+    ├── bindings/        qubit_py.cpp -> qubit_native, qubit_gpu.cu ->
+    │                    qubit_gpu_native (thin pybind over the library);
+    │                    build.bat / build_gpu.{bat,sh}
+    ├── pennylane_qubit/ the qubit.simulator device (analytic, shots, adjoint)
+    ├── vqe_helpers.py   shared ansatz / TFIM / exact-ground
+    ├── theory/ bench/ tests/ paper2/ spike/
 ```
 
-SOLID/DRY: one `CircuitBuilder` records the gate list; CPU and GPU
-executors inherit it and add only their run logic (single responsibility).
-One `vqe_helpers` defines the ansatz/Hamiltonian for every test and bench.
+SOLID/DRY: one `CircuitBuilder` (qubit lib) records the gate list; CPU and
+GPU executors inherit it and add only their run logic. The CPU adjoint
+evolves state through qubit's `DenseCPUT::apply()` and reads amplitudes via
+`buffer()` — no second gate kernel. Bindings are the only qtrain-side C++
+(thin pybind). One `vqe_helpers` feeds every test and bench.
 
-qtrain consumes the qubit library (header-only `include/qubit/qubit.h`).
-The CPU adjoint now evolves state through qubit's `DenseCPUT::apply()` and
-reads amplitudes via `buffer()` (added to qubit.h for this), so there is no
-second gate kernel on the CPU path. Remaining engine-side integration: the
-GPU adjoint still uses its own CUDA kernels; running it on qubit's GPU
-tiered-block backend is what reaches 30-32q (the sparse-block win). qtrain
-is a git submodule with its own history; engine additions land in qubit.
+Remaining engine integration: the GPU adjoint uses its own CUDA kernels;
+running it on qubit's GPU tiered-block backend is what reaches 30-32q. A
+recursive clone of qubit brings the library + the qtrain submodule.
 
 ## Success metrics (honest)
 
