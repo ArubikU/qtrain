@@ -14,9 +14,9 @@ c++ -O3 -std=c++17 -fopenmp -shared -fPIC $PYINC \
     bindings/qubit_py.cpp -o "qubit_native${EXT}"
 
 echo ">> GPU module (qubit_gpu_native), arch=${ARCH}"
-nvcc -O2 -std=c++17 -arch="${ARCH}" --shared \
+nvcc -O2 -std=c++17 -arch="${ARCH}" --shared -DQUBIT_CUDA \
     -Xcompiler "-fPIC -fopenmp -DNDEBUG" \
     $PYINC -I ../include \
-    bindings/qubit_gpu.cu -o "qubit_gpu_native${EXT}"
+    bindings/qubit_gpu.cu ../src/backend_gpu.cu -o "qubit_gpu_native${EXT}"
 
 echo ">> done: $(ls qubit_native${EXT} qubit_gpu_native${EXT})"

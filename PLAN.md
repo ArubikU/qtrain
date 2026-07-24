@@ -184,9 +184,15 @@ evolves state through qubit's `DenseCPUT::apply()` and reads amplitudes via
 `buffer()` — no second gate kernel. Bindings are the only qtrain-side C++
 (thin pybind). One `vqe_helpers` feeds every test and bench.
 
-Remaining engine integration: the GPU adjoint uses its own CUDA kernels;
-running it on qubit's GPU tiered-block backend is what reaches 30-32q. A
-recursive clone of qubit brings the library + the qtrain submodule.
+The dense GPU adjoint now runs on qubit's `DenseGPU` backend too: forward
+and inverse gates go through its `k_apply` kernel, trajectories are qubit's
+device buffers (`Backend::device_state()`), and only H/dot/gradient/int16
+are qtrain kernels on those buffers. `GPUCircuitQ` (int16 storage) stays
+standalone — that compression is not in qubit's dense engine.
+
+Remaining engine integration: run the adjoint on qubit's GPU TIERED-block
+backend (blocks_gpu.cu, ZERO/COMPRESSED/FULL) — the sparse-block path to
+30-32q on 6 GB. A recursive clone of qubit brings library + qtrain submodule.
 
 ## Success metrics (honest)
 

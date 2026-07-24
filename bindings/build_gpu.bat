@@ -10,10 +10,10 @@ set PYINC=C:\Users\ejane\AppData\Local\Programs\Python\Python312\Include
 set PYLIB=C:\Users\ejane\AppData\Local\Programs\Python\Python312\libs
 set PB11=C:\Users\ejane\AppData\Local\Programs\Python\Python312\Lib\site-packages\pybind11\include
 
-%NVCC% -O2 -std=c++17 -arch=sm_86 --shared ^
+%NVCC% -O2 -std=c++17 -arch=sm_86 --shared -DQUBIT_CUDA ^
    -Xcompiler "/openmp /EHsc /MD /utf-8 /DNDEBUG" ^
    -I"%PYINC%" -I"%PB11%" -I"..\include" ^
-   bindings\qubit_gpu.cu ^
+   bindings\qubit_gpu.cu ..\src\backend_gpu.cu ^
    -o qubit_gpu_native.pyd ^
    "%PYLIB%\python312.lib"
 exit /b %errorlevel%
