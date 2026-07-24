@@ -6,7 +6,8 @@
 set -e
 ARCH="${1:-sm_75}"
 PYINC=$(python3 -m pybind11 --includes)
-EXT=$(python3-config --extension-suffix)
+# python3-config is missing on some setups (e.g. Colab); sysconfig always works
+EXT=$(python3 -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))")
 
 echo ">> CPU module (qubit_native)"
 c++ -O3 -std=c++17 -fopenmp -shared -fPIC $PYINC \

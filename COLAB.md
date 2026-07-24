@@ -17,15 +17,17 @@ its submodule) and builds the GPU module against qubit's headers.
 git clone --quiet --recurse-submodules https://github.com/ArubikU/qubit.git
 cd qubit/qtrain
 pip -q install pybind11 numpy
+EXT=$(python3 -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))")
 nvcc -O2 -std=c++17 -arch=sm_75 --shared -DQUBIT_CUDA -Xcompiler "-fPIC -fopenmp -DNDEBUG" \
     $(python3 -m pybind11 --includes) -I ../include \
     bindings/qubit_gpu.cu ../src/backend_gpu.cu \
-    -o qubit_gpu_native$(python3-config --extension-suffix)
+    -o "qubit_gpu_native${EXT}"
 python bench/phase4_t4.py
 ```
 
 The dense adjoint runs on qubit's own GPU backend (`DenseGPU`, its
 `k_apply` kernel), so the build compiles + links `src/backend_gpu.cu`.
+(`sysconfig` gives the extension name; `python3-config` is absent on Colab.)
 
 `-arch=sm_75` is the T4 (Turing). Other cards: A100 `sm_80`, L4 `sm_89`,
 RTX 30xx `sm_86`.
